@@ -1,6 +1,104 @@
 from dataclasses import dataclass, field, fields
-from typing import Any, Dict, List, Optional, Union, get_type_hints, NewType
+from typing import Any, Dict, List, Optional, Union, get_type_hints
 import uuid
+import logging
+from duckdb import DuckDBPyConnection
+
+logger = logging.getLogger(__name__)
+
+
+class Select:
+    def __init__(self, model: Union["BaseModel", str], columns="*"):
+        if isinstance(model, str):
+            self.table = model
+        else:
+            self.table = model.table_name
+
+        self.columns = "*"
+        self.joins = []
+        self.where_clauses = []
+        self.group_by_columns = []
+        self.having_clauses = []
+        self.order_by_columns = []
+
+        if columns != "*":
+            if isinstance(columns, str):
+                self.columns = columns
+            else:
+                self.columns = ", ".join(columns)
+
+    def select(self, *columns):
+        """Specify columns to select."""
+        if columns:
+            self.columns = ", ".join(columns)
+        return self
+
+    def join(
+        self, model: Union["BaseModel", str], *, how="inner", on=None, condition=None
+    ):
+        """Add a JOIN clause."""
+        if type(model) is str:
+            table = model
+        else:
+            table = model.table_name
+
+        if on:
+            self.joins.append(f"{how} JOIN {table} USING ({on})")
+        elif condition:
+            self.joins.append(f"{how} JOIN {table} ON {condition}")
+        else:
+            raise ValueError("Either column or condition must be provided.")
+        return self
+
+    def where(self, condition):
+        """Add a WHERE condition."""
+        self.where_clauses.append(condition)
+        return self
+
+    def group_by(self, *columns):
+        """Add GROUP BY columns."""
+        self.group_by_columns.extend(columns)
+        return self
+
+    def having(self, condition):
+        """Add a HAVING condition."""
+        self.having_clauses.append(condition)
+        return self
+
+    def order_by(self, *columns):
+        """Add ORDER BY columns."""
+        self.order_by_columns.extend(columns)
+        return self
+
+    def sql(self, offset=None, limit=None):
+        """Generate the final SQL query."""
+        query = f"SELECT {self.columns} FROM {self.table}"
+
+        if self.joins:
+            query += " " + " ".join(self.joins)
+
+        if self.where_clauses:
+            query += " WHERE " + " AND ".join(self.where_clauses)
+
+        if self.group_by_columns:
+            query += " GROUP BY " + ", ".join(self.group_by_columns)
+
+        if self.having_clauses:
+            query += " HAVING " + " AND ".join(self.having_clauses)
+
+        if self.order_by_columns:
+            query += " ORDER BY " + ", ".join(self.order_by_columns)
+
+        if offset:
+            query += f" OFFSET {offset}"
+
+        if limit:
+            query += f" LIMIT {limit}"
+
+        return query + ";"
+
+    def __str__(self):
+        return self.sql()
 
 
 def get_sql_type(field_type: Any) -> str:
@@ -20,9 +118,10 @@ def get_sql_type(field_type: Any) -> str:
     if hasattr(field_type, "__origin__") and field_type.__origin__ is Optional:
         field_type = field_type.__args__[0]
 
-    # Handle List types by extracting the inner type
-    if hasattr(field_type, "__origin__") and field_type.__origin__ is list:
-        field_type = field_type.__args__[0]
+    if hasattr(field_type, "__origin__") and field_type.__origin__ is Union:
+        # For Union types, use the first non-None type
+        non_none_types = [t for t in field_type.__args__ if t is not type(None)]
+        field_type = non_none_types[0] if non_none_types else str
 
     # Check for nested dataclass
     if hasattr(field_type, "__dataclass_fields__"):
@@ -89,9 +188,28 @@ class BaseModel:
                 init_args[field_name] = value
         return cls(**init_args)
 
-    def insert_sql(self, ignore_conflicts: bool = False, duplicate: str = None) -> str:
-        cols = ", ".join(f for f in self.columns)
-        values = ", ".join(f"?" for f in self.columns)
+    @classmethod
+    def select(
+        cls, conn, where: str = "", offset=None, limit=None
+    ) -> List["BaseModel"]:
+        return conn.execute(Select(cls, "*").where(where).sql(offset, limit)).fetchall()
+
+    def insert(
+        self,
+        conn: DuckDBPyConnection,
+        *,
+        ignore_conflicts: bool = False,
+        duplicate: str = None,
+    ) -> str:
+
+        non_null_cols = {
+            col: getattr(self, col)
+            for col in self.columns
+            if getattr(self, col) is not None
+        }
+
+        cols = ", ".join(non_null_cols.keys())
+        values = ", ".join(f"?" for f in non_null_cols.keys())
 
         sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({values})"
         if ignore_conflicts:
@@ -99,25 +217,24 @@ class BaseModel:
         elif duplicate:
             sql += f" ON CONFLICT ({duplicate}) DO UPDATE SET {', '.join(f'{f.name}=EXCLUDED.{f.name}' for f in fields(self) if f.name != "table_name" and f.name not in self.pk())}"
 
-        return (f"{sql};", [getattr(self, f) for f in self.columns])
+        logger.debug(sql)
+        conn.execute(f"{sql};", non_null_cols.values())
 
-    def select_sql(self, where_clause: str = "") -> str:
-        cols = ", ".join(f for f in self.columns)
-        sql = f"SELECT {cols} FROM {self.table_name}"
-        if where_clause:
-            sql += f" WHERE {where_clause}"
-        return sql + ";"
+    def update(self, conn, cols=None) -> str:
+        if not cols:
+            cols = self.columnss
 
-    def update_sql(self, where_clause: str) -> str:
-        set_clause = ", ".join(f"{f.name} = ?" for f in self.columns)
+        set_clause = ", ".join(f"{f.name} = ?" for f in cols)
 
-        return (
-            f"UPDATE {self.table_name} SET {set_clause} WHERE {where_clause};",
-            [getattr(self, f.name) for f in self.columns],
+        return conn.execute(
+            f"UPDATE {self.table_name} SET {set_clause} WHERE {self.pk} = '{getattr(self, self.pk)}';",
+            [getattr(self, f.name) for f in cols],
         )
 
-    def delete_sql(self, where_clause: str) -> str:
-        return f"DELETE FROM {self.table_name} WHERE {where_clause};"
+    def delete(self, conn) -> str:
+        return conn.execute(
+            f"DELETE FROM {self.table_name} WHERE {self.pk} = '{getattr(self, self.pk)}';"
+        )
 
     @classmethod
     def create_table_sql(cls) -> str:
@@ -221,8 +338,16 @@ class User(BaseModel):
     username: str
     usericon: str
     type: str
-    is_watching: Optional[bool]
     is_subscribed: Optional[bool]
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> "User":
+        return BaseModel.from_json(cls, data)
+
+
+@dataclass
+class ExtendedUser(User):
+    is_watching: Optional[bool]
     details: Optional[Dict[str, Any]]
     geo: Optional[Dict[str, Any]]
     profile: Optional[Dict[str, Any]]
@@ -231,7 +356,7 @@ class User(BaseModel):
     session: Optional[Dict[str, Any]]
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]) -> "User":
+    def from_json(cls, data: Dict[str, Any]) -> "ExtendedUser":
         return BaseModel.from_json(cls, data)
 
     @classmethod
@@ -282,7 +407,7 @@ class Activity(BaseModel):
     deviationid: uuid.UUID = field(
         metadata={"primary_key": True, "foreign_key": Deviation}
     )
-    userId: uuid.UUID = field(metadata={"primary_key": True})
+    userid: uuid.UUID = field(metadata={"primary_key": True})
     action: str = field(metadata={"primary_key": True})
     time: str = field(metadata={"primary_key": True})
     user: User

@@ -5,7 +5,7 @@ import os
 import json
 import logging
 
-from models import Deviation, Activity
+from models import Deviation, Activity, Select
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -184,15 +184,22 @@ def populate_favorites(da: DeviantArt):
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
         logger.info(Activity.create_table_sql())
         db.execute(Activity.create_table_sql())
+        select = (
+            Select(
+                Deviation,
+                [
+                    "deviationid",
+                    "stats.favourites",
+                    f"count({Activity.table_name}.deviationid)",
+                ],
+            )
+            .join(Activity, on="deviationid", how="left")
+            .group_by("deviationid", "stats.favourites")
+            .having(f"stats.favourites <> count({Activity.table_name}.deviationid)")
+        )
+        logger.info(select.sql())
+        rows = db.execute(select.sql()).fetchall()
 
-        rows = db.execute(
-            """select deviationid, stats.favourites, count(*)
-                from deviation
-                    left join activty on deviation.deviationid = activity.deviationid
-                group by deviationid, stats.favourites
-                having count(*) <> stats.favourites
-                """
-        ).fetchall()
         for deviation_id, fav, count in rows:
             logger.info(f"Fetching metadata for deviation: {deviation_id}")
             try:
@@ -214,7 +221,8 @@ def populate_favorites(da: DeviantArt):
                             time=item.get("time"),
                             action="fave",
                         )
-                        db.execute(a.insert_sql())
+                        a.insert(db, ignore_conflicts=True)
+
                     else:
                         offset = metadata.get("next_offset", 0)
 

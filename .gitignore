@@ -163,3 +163,4 @@ cython_debug/
 .credentials.json
 .token.json
 deviantart_data.db
+deviantart_data.db.wal

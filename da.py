@@ -4,8 +4,9 @@ import time
 import os
 import json
 import logging
+from datetime import datetime
 
-from models import Deviation, Activity, Select
+from models import Deviation, DeviationActivity, Select
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -13,7 +14,8 @@ logger.setLevel(logging.INFO)
 # Constants for DeviantArt API
 API_BASE_URL = "https://www.deviantart.com/api/v1/oauth2"
 COLLECTIONS_ENDPOINT = "/gallery/all"
-METADATA_ENDPOINT = "/deviation/whofaved"
+WHOFAVED_ENDPOINT = "/deviation/whofaved"
+METADATA_ENDPOINT = "/deviation/metadata"
 
 AUTHORIZATION_BASE_URL = "https://www.deviantart.com/oauth2/authorize"
 TOKEN_URL = "https://www.deviantart.com/oauth2/token"
@@ -128,8 +130,7 @@ class DeviantArt:
 
         return token_response.json()
 
-    # Function to fetch deviations
-    def fetch_deviations(self, offset=0, limit=24, gallery="all"):
+    def _get_deviations(self, offset=0, limit=24, gallery="all"):
         url = f"{API_BASE_URL}/gallery/{gallery}"
         params = {
             "access_token": self.access_token,
@@ -147,7 +148,7 @@ class DeviantArt:
         has_more = True
         while has_more:
             logger.info(f"Fetching gallery {gallery}: offset={offset}, limit={limit}")
-            data = self.fetch_deviations(offset, limit, gallery=gallery)
+            data = self._get_deviations(offset, limit, gallery=gallery)
             results = data.get("results", [])
             has_more = data.get("has_more", False)
             offset = data.get("next_offset", 0)
@@ -159,12 +160,24 @@ class DeviantArt:
                 yield Deviation.from_json(item)
 
     def get_whofaved(self, deviation_id, offset=0):
-        url = f"{API_BASE_URL}{METADATA_ENDPOINT}"
+        url = f"{API_BASE_URL}{WHOFAVED_ENDPOINT}"
 
         params = {
             "deviationid": deviation_id,
             "offset": offset,
             "access_token": self.access_token,
+        }
+        return raise_for_status(requests.get(url, params=params)).json()
+
+    def get_metadata(self, deviation_ids: list):
+        url = f"{API_BASE_URL}{METADATA_ENDPOINT}"
+        params = {
+            "deviationids": ",".join(deviation_ids),
+            "access_token": self.access_token,
+            "ext_camera": "true",
+            "ext_stats": "true",
+            "ext_collection": "true",
+            "ext_gallery": "true",
         }
         return raise_for_status(requests.get(url, params=params)).json()
 
@@ -177,31 +190,55 @@ def populate_gallery(da: DeviantArt, gallery="all"):
 
         for item in da.get_all_deviations(gallery=gallery):
             logger.debug(item)
-            db.execute(*item.insert_sql(duplicate="deviationid"))
+            item.insert(db, duplicate="deviationid")
+
+
+def populate_metadata(da: DeviantArt):
+    with duckdb.connect("deviantart_data.db", read_only=False) as db:
+        offset = 0
+        rows = [1]
+        limit = 10
+        while rows:
+            rows = db.execute(
+                Select(Deviation, ["deviationid"]).sql(offset=offset, limit=limit)
+            ).fetchall()
+
+            deviation_ids = [row[0] for row in rows]
+            response = da.get_metadata(deviation_ids)
+
+            results = response.get("results", [])
+            for item in results:
+                deviation = Deviation.from_json(item)
+                deviation.insert(db, duplicate="deviationid")
+
+        # Throttle API calls to avoid rate limiting
+        time.sleep(1)
 
 
 def populate_favorites(da: DeviantArt):
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
-        logger.info(Activity.create_table_sql())
-        db.execute(Activity.create_table_sql())
+        logger.info(DeviationActivity.create_table_sql())
+        db.execute(DeviationActivity.create_table_sql())
         select = (
             Select(
                 Deviation,
                 [
                     "deviationid",
                     "stats.favourites",
-                    f"count({Activity.table_name}.deviationid)",
+                    f"count({DeviationActivity.table_name}.deviationid)",
                 ],
             )
-            .join(Activity, on="deviationid", how="left")
+            .join(DeviationActivity, on="deviationid", how="left")
             .group_by("deviationid", "stats.favourites")
-            .having(f"stats.favourites <> count({Activity.table_name}.deviationid)")
+            .having(
+                f"stats.favourites <> count({DeviationActivity.table_name}.deviationid)"
+            )
         )
         logger.info(select.sql())
         rows = db.execute(select.sql()).fetchall()
 
         for deviation_id, fav, count in rows:
-            logger.info(f"Fetching metadata for deviation: {deviation_id}")
+            logger.info(f"Fetching /whofaved for deviation: {deviation_id}")
             try:
                 offset = 0
                 has_more = True
@@ -214,12 +251,13 @@ def populate_favorites(da: DeviantArt):
                         break
 
                     for item in results:
-                        a = Activity(
+                        a = DeviationActivity(
                             deviationid=deviation_id,
                             userid=item.get("user", {}).get("userid"),
                             user=item.get("user"),
                             time=item.get("time"),
                             action="fave",
+                            timestamp=datetime.fromtimestamp(item.get("time")),
                         )
                         a.insert(db, ignore_conflicts=True)
 
@@ -248,7 +286,8 @@ if __name__ == "__main__":
     print("Data collection completed.")
 
     with duckdb.connect("deviantart_data.db", read_only=True) as db:
-        for url, favourites, comments in db.execute(
-            "SELECT url, stats.favourites, stats.comments FROM deviations order by stats.favourites + stats.comments desc limit 10"
-        ).fetchall():
-            print(f"{url}, Favourites: {favourites}, Comments: {comments}")
+        df = db.execute(
+            """SELECT url, stats.favourites, stats.comments 
+            FROM deviations order by stats.favourites + stats.comments desc limit 15"""
+        ).fetch_df()
+        print(df)

@@ -3,5 +3,3 @@ duckdb
 flask
 pandas
 black
-dash
-plotly

@@ -1,0 +1,9 @@
+{% for row in table_data %}
+<tr>
+  <td><a href="{{row.url}}">{{ row.title }}</a></td>
+  <td>{{ row.stats.favourites }}</td>
+  <td>{{ row.stats.comments }}</td>
+  <td>{{ row.total }}</td>
+</tr>
+
+{% endfor %}

@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Union, get_type_hints
 import uuid
 import logging
 from duckdb import DuckDBPyConnection
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,7 @@ def get_sql_type(field_type: Any) -> str:
         list: "JSON",  # Arrays and lists default to JSON
         BaseModel: "STRUCT",  # Nested dataclasses map to STRUCT
         uuid.UUID: "UUID",
+        datetime: "TIMESTAMP",
     }
 
     # Handle Optional types by extracting the inner type
@@ -218,7 +220,7 @@ class BaseModel:
             sql += f" ON CONFLICT ({duplicate}) DO UPDATE SET {', '.join(f'{f.name}=EXCLUDED.{f.name}' for f in fields(self) if f.name != "table_name" and f.name not in self.pk())}"
 
         logger.debug(sql)
-        conn.execute(f"{sql};", non_null_cols.values())
+        return conn.execute(f"{sql};", non_null_cols.values())
 
     def update(self, conn, cols=None) -> str:
         if not cols:
@@ -333,7 +335,19 @@ class MotionBook:
 
 
 @dataclass
-class User(BaseModel):
+class DeviationUser(BaseModel):
+    userid: uuid.UUID = field(metadata={"primary_key": True})
+    username: str
+    usericon: str
+    type: str
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> "DeviationUser":
+        return BaseModel.from_json(cls, data)
+
+
+@dataclass
+class ActivityUser:
     userid: uuid.UUID = field(metadata={"primary_key": True})
     username: str
     usericon: str
@@ -341,22 +355,7 @@ class User(BaseModel):
     is_subscribed: Optional[bool]
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]) -> "User":
-        return BaseModel.from_json(cls, data)
-
-
-@dataclass
-class ExtendedUser(User):
-    is_watching: Optional[bool]
-    details: Optional[Dict[str, Any]]
-    geo: Optional[Dict[str, Any]]
-    profile: Optional[Dict[str, Any]]
-    stats: Optional[Dict[str, Any]]
-    sidebar: Optional[Dict[str, Any]]
-    session: Optional[Dict[str, Any]]
-
-    @classmethod
-    def from_json(cls, data: Dict[str, Any]) -> "ExtendedUser":
+    def from_json(cls, data: Dict[str, Any]) -> "ActivityUser":
         return BaseModel.from_json(cls, data)
 
     @classmethod
@@ -376,7 +375,7 @@ class Deviation(BaseModel):
     is_deleted: bool
     is_published: Optional[bool]
     is_blocked: Optional[bool]
-    author: Optional[User]
+    author: Optional[DeviationUser]
     stats: Optional[Stats]
     published_time: Optional[str]
     allows_comments: Optional[bool]
@@ -401,7 +400,7 @@ class Deviation(BaseModel):
 
 
 @dataclass
-class Activity(BaseModel):
+class DeviationActivity(BaseModel):
     table_name = "deviation_activity"
 
     deviationid: uuid.UUID = field(
@@ -409,5 +408,8 @@ class Activity(BaseModel):
     )
     userid: uuid.UUID = field(metadata={"primary_key": True})
     action: str = field(metadata={"primary_key": True})
-    time: str = field(metadata={"primary_key": True})
-    user: User
+    time: int = field(metadata={"primary_key": True})
+
+    timestamp: datetime
+
+    user: ActivityUser

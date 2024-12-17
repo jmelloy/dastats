@@ -12,6 +12,10 @@ import time
 app = Flask(__name__)
 da = DeviantArt()
 
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
 
 def populate_da():
     try:

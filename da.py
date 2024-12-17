@@ -196,7 +196,7 @@ class DeviantArt:
 def populate_gallery(da: DeviantArt, gallery="all"):
     # Initialize DuckDB connection
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
-        print(Deviation.create_table_sql())
+        logging.info(Deviation.create_table_sql())
         db.execute(Deviation.create_table_sql())
 
         for item in da.get_all_deviations(gallery=gallery):

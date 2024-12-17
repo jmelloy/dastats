@@ -1,11 +1,9 @@
 from flask import Flask, request, redirect, jsonify, render_template
 from da import DeviantArt
-from models import Select, Deviation, DeviationActivity
-import duckdb
 
 import os
-import json
 from datetime import datetime
+from sql import top_by_activity, get_deviation_activity
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -46,49 +44,32 @@ def callback():
     return jsonify(data)
 
 
-conn = duckdb.connect("deviantart_data.db", read_only=True)
-
-
 @app.route("/stats/")
 def stats():
     return render_template("dashboard.html")
 
 
-def query_database(start_time):
-    # Connect to the database
-    with open("sql/top10_activity.sql") as F:
-        query = F.read()
-
-    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
-        cursor = conn.cursor()
-
-        query = query.format(start_date=start_time)
-
-        cursor = conn.cursor()
-        cursor.execute(query)
-        columns = [col[0].lower() for col in cursor.description]
-
-        # Convert the cursor to a list of dictionaries
-        rs = []
-        for row in cursor.fetchall():
-            v = dict(zip(columns, row))
-
-            v["total"] = sum([x["count"] for x in v["timestamps"]])
-
-            rs.append(v)
-
-        return rs
-
-
 @app.route("/update-table", methods=["POST"])
 def update_table():
     date_str = request.form.get("date")
+    limit = request.form.get("limit", 10)
     if date_str:
         date_object = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
-        table_data = query_database(date_object)
-        print(table_data)
+        table_data = top_by_activity(date_object, limit, da.access_token)
+
         return render_template("partials/table.html", table_data=table_data)
     return "Invalid date", 400
+
+
+@app.route("/get-sparkline-data", methods=["POST"])
+def get_sparkline_data():
+    event_id = request.json.get("id")
+    date_str = request.json.get("date")
+    if event_id:
+        # Simulate event-specific data points
+        sparkline_data = get_deviation_activity(event_id, date_str)
+        return jsonify({"status": "success", "data": sparkline_data})
+    return jsonify({"status": "error", "message": "Invalid event ID"}), 400
 
 
 if __name__ == "__main__":

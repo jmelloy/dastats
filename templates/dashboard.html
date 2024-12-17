@@ -14,7 +14,7 @@
     />
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://unpkg.com/htmx.org"></script>
-    <script src="https://cdnjs.com/libraries/Chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   </head>
   <body>
     <div class="container mt-5">
@@ -57,8 +57,9 @@
     </div>
 
     <script>
+      let datePicker = null;
       document.addEventListener("DOMContentLoaded", function () {
-        const datePicker = flatpickr("#datetime-picker", {
+        datePicker = flatpickr("#datetime-picker", {
           enableTime: true,
           dateFormat: "Y-m-d\\TH:i:S",
           defaultDate: new Date(new Date().getTime() - 24 * 60 * 60 * 1000), // Set to 24 hours ago
@@ -70,6 +71,68 @@
           true
         );
       });
+
+      // Function to initialize sparklines for each row
+      function initializeSparklines() {
+        const canvasElements = document.querySelectorAll(
+          "canvas[id^='sparkline-']"
+        );
+
+        canvasElements.forEach((canvas) => {
+          const eventId = canvas.id.replace("sparkline-", "");
+
+          fetch("/get-sparkline-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: eventId,
+              date: datePicker.selectedDates[0],
+            }),
+          })
+            .then((response) => response.json())
+            .then((data) => {
+              if (data.status === "success") {
+                const ctx = canvas.getContext("2d");
+
+                new Chart(ctx, {
+                  type: "line",
+                  data: {
+                    labels: data.data.map((point) => point.timestamp),
+                    datasets: [
+                      {
+                        data: data.data.map((point) => point.count),
+                        borderColor: "#007bff",
+                        backgroundColor: "rgba(0, 123, 255, 0.2)",
+                        fill: true,
+                        tension: 0.4,
+                      },
+                    ],
+                  },
+                  options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                      x: { display: false },
+                      y: { display: false },
+                    },
+                    plugins: { legend: { display: false } },
+                  },
+                });
+              }
+            });
+        });
+      }
+
+      // Listen for htmx events to reinitialize sparklines after table update
+      document.body.addEventListener("htmx:afterSwap", function (event) {
+        console.log(event);
+        if (event.detail.target.id === "table-body") {
+          initializeSparklines();
+        }
+      });
+
+      // Initialize sparklines on page load
+      initializeSparklines();
     </script>
   </body>
 </html>

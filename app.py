@@ -64,7 +64,7 @@ def callback():
         return "Error: No code received."
 
     data = da.update_access_token(code)
-    return jsonify(data)
+    return redirect("/stats/")
 
 
 @app.route("/stats/")

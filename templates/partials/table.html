@@ -1,14 +1,15 @@
 {% for row in table_data %}
 <tr>
   <td>
-    <a href="{{row.url}}"
-      ><!-- <img src="{{row.preview_src}}" height="60" /> -->
-      {{ row.title }}</a
-    >
+    <a href="{{row.url}}" target="_blank">
+      <img src="{{row.preview.src}}" height="60" /><br
+    /></a>
   </td>
+  <td>{{ row.title }}</td>
   <td>{{ row.stats.favourites }}</td>
   <td>{{ row.stats.comments }}</td>
-  <td style="max-height: 50">
+  <td>{{row.count}}</td>
+  <td>
     <canvas
       id="sparkline-{{ row.deviationid }}"
       width="100"

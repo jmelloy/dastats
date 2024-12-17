@@ -2,25 +2,25 @@ import duckdb
 from models import *
 from datetime import datetime, timedelta
 
-conn = duckdb.connect("deviantart_data.db", read_only=True)
 
+def top_by_activity(start_time, limit=10):
 
-def top_by_activity(start_time, limit=10, token="REDACTED"):
     # Connect to the database
     query = (
         Select(Deviation)
         .join(DeviationActivity, on="deviationid")
         .select(
             "deviations.*",
-            "count(*)",
-            f"regexp_replace(preview.src, 'token=[^&]+', 'token=' || '{token}') as preview_src",
+            "count(*) count",
         )
         .where(f"timestamp >= '{start_time}'")
         .group_by("deviations.*")
-        .order_by("count(*) desc")
+        .order_by("count(*) desc, published_time")
     )
 
-    with conn.cursor() as cursor:
+    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
+        print(query.sql(limit=limit))
+        cursor = conn.cursor()
         cursor.execute(query.sql(limit=limit))
         columns = [col[0].lower() for col in cursor.description]
 
@@ -72,7 +72,8 @@ def get_deviation_activity(deviationid, start_date):
         ORDER BY ts.time_bucket
     """
     print(query)
-    with conn.cursor() as cursor:
+    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
+        cursor = conn.cursor()
         cursor.execute(query)
 
         columns = [col[0].lower() for col in cursor.description]

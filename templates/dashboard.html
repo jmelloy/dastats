@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Flask with htmx</title>
+    <title>DeviantArt Statistics</title>
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
       rel="stylesheet"
@@ -17,22 +17,42 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   </head>
   <body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+      <div class="container">
+        <a class="navbar-brand" href="/">DeviantArt Statistics</a>
+      </div>
+    </nav>
     <div class="container mt-5">
-      <h1 class="text-center">Date Picker with htmx Table Update</h1>
+      <h1 class="text-center">Popular Deviations</h1>
       <div class="row mt-4">
         <div class="col-md-6 offset-md-3">
-          <label for="datetime-picker" class="form-label"
-            >Select Date/Time</label
-          >
-          <input
-            id="datetime-picker"
-            class="form-control"
-            name="date"
+          <form
+            id="main-form"
             hx-post="/update-table"
             hx-target="#table-body"
             hx-trigger="change"
-            placeholder="Choose a date and time"
-          />
+          >
+            <!-- Date/Time Picker -->
+            <label for="datetime-picker" class="form-label"
+              >Select Date/Time</label
+            >
+            <input
+              id="datetime-picker"
+              name="date"
+              placeholder="Choose a date and time"
+            />
+
+            <!-- Optional Limit Field -->
+            <label for="limit-field" class="form-label mt-3">Limit</label>
+            <input
+              id="limit-field"
+              name="limit"
+              type="number"
+              min="1"
+              value="10"
+              placeholder="Enter a limit (default: 10)"
+            />
+          </form>
         </div>
       </div>
       <div class="row mt-4">
@@ -40,7 +60,8 @@
           <table class="table table-bordered">
             <thead>
               <tr>
-                <th>URL</th>
+                <th>Image</th>
+                <th>Title</th>
                 <th>Total Favorites</th>
                 <th>Total Comments</th>
                 <th>Time Range</th>
@@ -97,7 +118,16 @@
                 new Chart(ctx, {
                   type: "line",
                   data: {
-                    labels: data.data.map((point) => point.timestamp),
+                    labels: data.data.map((point) => {
+                      const date = new Date(point.timestamp);
+                      return date.toLocaleString("en-US", {
+                        month: "2-digit",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false, // Use 24-hour time
+                      });
+                    }),
                     datasets: [
                       {
                         data: data.data.map((point) => point.count),
@@ -105,11 +135,13 @@
                         backgroundColor: "rgba(0, 123, 255, 0.2)",
                         fill: true,
                         tension: 0.4,
+                        pointRadius: 1,
+                        pointHoverRadius: 3,
                       },
                     ],
                   },
                   options: {
-                    responsive: true,
+                    responsive: false,
                     maintainAspectRatio: false,
                     scales: {
                       x: { display: false },
@@ -125,7 +157,6 @@
 
       // Listen for htmx events to reinitialize sparklines after table update
       document.body.addEventListener("htmx:afterSwap", function (event) {
-        console.log(event);
         if (event.detail.target.id === "table-body") {
           initializeSparklines();
         }

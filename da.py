@@ -5,6 +5,7 @@ import os
 import json
 import logging
 from datetime import datetime
+import pandas as pd
 
 from models import Deviation, DeviationActivity, Select
 
@@ -160,7 +161,7 @@ class DeviantArt:
                 yield Deviation.from_json(item)
 
     def get_whofaved(self, deviation_id, offset=0):
-        url = f"{API_BASE_URL}{WHOFAVED_ENDPOINT}"
+        url = f"{API_BASE_URL}/deviation/whofaved"
 
         params = {
             "deviationid": deviation_id,
@@ -170,7 +171,7 @@ class DeviantArt:
         return raise_for_status(requests.get(url, params=params)).json()
 
     def get_metadata(self, deviation_ids: list):
-        url = f"{API_BASE_URL}{METADATA_ENDPOINT}"
+        url = f"{API_BASE_URL}/deviation/metadata"
         params = {
             "deviationids": ",".join(deviation_ids),
             "access_token": self.access_token,
@@ -180,6 +181,16 @@ class DeviantArt:
             "ext_gallery": "true",
         }
         return raise_for_status(requests.get(url, params=params)).json()
+
+    def whoami(self):
+        return raise_for_status(
+            requests.get(
+                f"{API_BASE_URL}/user/whoami",
+                params={
+                    "access_token": self.access_token,  # this doesn't work?
+                },
+            )
+        ).json()
 
 
 def populate_gallery(da: DeviantArt, gallery="all"):
@@ -270,6 +281,12 @@ def populate_favorites(da: DeviantArt):
                 logger.error(f"Error fetching metadata for {deviation_id}: {e}")
 
 
+def populate(da: DeviantArt):
+    populate_gallery(da, gallery="all")
+    # populate_metadata(da)
+    populate_favorites(da)
+
+
 if __name__ == "__main__":
 
     logging.basicConfig(
@@ -287,7 +304,9 @@ if __name__ == "__main__":
 
     with duckdb.connect("deviantart_data.db", read_only=True) as db:
         df = db.execute(
-            """SELECT url, stats.favourites, stats.comments 
+            """SELECT title, stats.favourites, stats.comments, url
             FROM deviations order by stats.favourites + stats.comments desc limit 15"""
         ).fetch_df()
-        print(df)
+
+        with pd.option_context("display.max_colwidth", None):
+            print(df)

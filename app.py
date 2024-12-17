@@ -1,13 +1,33 @@
 from flask import Flask, request, redirect, jsonify, render_template
-from da import DeviantArt
+from da import DeviantArt, populate
 
 import os
 from datetime import datetime
 from sql import top_by_activity, get_deviation_activity
 
+import multiprocessing
+import time
+
 # Initialize Flask app
 app = Flask(__name__)
 da = DeviantArt()
+
+
+def populate_da():
+    try:
+        da.check_token()
+        populate(da)
+    except Exception as e:
+        print(e)
+
+
+def populate_hourly():
+    while True:
+        try:
+            populate_da()
+        except Exception as e:
+            print(e)
+        time.sleep(3600)
 
 
 @app.route("/")
@@ -30,6 +50,9 @@ def login():
         return "Error: Missing client_id or client_secret."
     da.set_credentials(client_id, client_secret)
 
+    p = multiprocessing.Process(target=populate_da)
+    p.start()
+
     return redirect(da.authorization_url())
 
 
@@ -46,16 +69,19 @@ def callback():
 
 @app.route("/stats/")
 def stats():
-    return render_template("dashboard.html")
+    return render_template(
+        "dashboard.html",
+    )
 
 
 @app.route("/update-table", methods=["POST"])
 def update_table():
     date_str = request.form.get("date")
     limit = request.form.get("limit", 10)
+
     if date_str:
         date_object = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
-        table_data = top_by_activity(date_object, limit, da.access_token)
+        table_data = top_by_activity(date_object, limit)
 
         return render_template("partials/table.html", table_data=table_data)
     return "Invalid date", 400
@@ -73,4 +99,7 @@ def get_sparkline_data():
 
 
 if __name__ == "__main__":
+    p = multiprocessing.Process(target=populate_hourly)
+    p.start()
+
     app.run(port=8080, debug=True)

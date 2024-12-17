@@ -2,7 +2,7 @@
 
 First, set up an App in Deviant Art (User -> Settings -> Apps & Uploads). Set the referral URL to localhost:8080/login.
 
-![Authorized Application](screenshots/AuthorizedApplication.png?raw=true)
+![Authorized Application](screenshots/AuthorizedApps.png?raw=true)
 ![Application Setup](screenshots/ApplicationSetup.png?raw=true)
 
 Second, get the secret key from (User -> Settings -> My Applications) [https://www.deviantart.com/developers/apps]

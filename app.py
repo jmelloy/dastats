@@ -6,6 +6,7 @@ from datetime import datetime
 from sql import top_by_activity, get_deviation_activity
 
 import multiprocessing
+import threading
 import time
 
 # Initialize Flask app
@@ -20,7 +21,8 @@ logging.basicConfig(level=logging.INFO)
 def populate_da():
     try:
         da.check_token()
-        populate(da)
+        p = multiprocessing.Process(target=populate, args=(da))
+        p.start()
     except Exception as e:
         print(e)
 
@@ -103,7 +105,7 @@ def get_sparkline_data():
 
 
 if __name__ == "__main__":
-    p = multiprocessing.Process(target=populate_hourly)
-    p.start()
+    t = threading.Thread(target=populate_hourly)
+    t.start()
 
     app.run(port=8080, debug=True)

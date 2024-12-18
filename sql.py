@@ -1,6 +1,16 @@
 import duckdb
 from models import *
 from datetime import datetime, timedelta
+import os
+
+conn
+
+
+def get_connection():
+    global conn
+    if not conn and os.path.exists("deviantart_data.db"):
+        conn = duckdb.connect("deviantart_data.db")
+    return conn
 
 
 def top_by_activity(start_time, limit=10):
@@ -17,10 +27,14 @@ def top_by_activity(start_time, limit=10):
         .group_by("deviations.*")
         .order_by("count(*) desc, published_time")
     )
+    conn = get_connection()
+    if not conn:
+        logger.error("Database connection not available.")
+        return []
 
-    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
+    with conn.cursor() as cursor:
         print(query.sql(limit=limit))
-        cursor = conn.cursor()
+
         cursor.execute(query.sql(limit=limit))
         columns = [col[0].lower() for col in cursor.description]
 
@@ -71,9 +85,14 @@ def get_deviation_activity(deviationid, start_date):
         ON ts.time_bucket = gd.time_bucket
         ORDER BY ts.time_bucket
     """
+
+    conn = get_connection()
+    if not conn:
+        logger.error("Database connection not available.")
+        return []
+
     print(query)
-    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
-        cursor = conn.cursor()
+    with conn.cursor() as cursor:
         cursor.execute(query)
 
         columns = [col[0].lower() for col in cursor.description]

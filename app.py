@@ -17,11 +17,14 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
+p = None
+
 
 def populate_da():
+    global p
     try:
         da.check_token()
-        p = multiprocessing.Process(target=populate, args=(da))
+        p = multiprocessing.Process(target=populate, args=(da,))
         p.start()
     except Exception as e:
         print(e)
@@ -29,10 +32,13 @@ def populate_da():
 
 def populate_hourly():
     while True:
-        try:
-            populate_da()
-        except Exception as e:
-            print(e)
+        if p:
+            p.join()
+        else:
+            try:
+                populate_da()
+            except Exception as e:
+                print(e)
         time.sleep(3600)
 
 

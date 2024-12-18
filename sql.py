@@ -3,13 +3,13 @@ from models import *
 from datetime import datetime, timedelta
 import os
 
-conn
+conn = None
 
 
 def get_connection():
     global conn
     if not conn and os.path.exists("deviantart_data.db"):
-        conn = duckdb.connect("deviantart_data.db")
+        conn = duckdb.connect("deviantart_data.db", read_only=True)
     return conn
 
 

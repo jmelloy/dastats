@@ -224,6 +224,12 @@ def populate_gallery(da: DeviantArt, gallery="all"):
 
         for item in da.get_all_deviations(gallery=gallery):
             logger.debug(item)
+            author = item.author
+            if author:
+                author.insert(db, duplicate="userid")
+                item.user_id = author.userid
+                item.author = None
+
             item.insert(db, duplicate="deviationid")
 
 
@@ -240,6 +246,13 @@ def populate_metadata(da: DeviantArt):
 
         deviation_ids = [str(row[0]) for row in rows]
         for item in da.get_metadata(deviation_ids):
+            logger.debug(item)
+            user = item.author
+            if user:
+                user.insert(db, duplicate="userid")
+                item.user_id = user.userid
+                item.author = None
+
             item.insert(db, duplicate="deviationid")
 
 def populate_favorites(da: DeviantArt):
@@ -279,10 +292,13 @@ def populate_favorites(da: DeviantArt):
                         break
 
                     for item in results:
+                        user = User.from_json(item.get("user"))
+                        if user:
+                            user.insert(db, duplicate="userid")
+                            
                         a = DeviationActivity(
                             deviationid=deviation_id,
                             userid=item.get("user", {}).get("userid"),
-                            user=item.get("user"),
                             time=item.get("time"),
                             action="fave",
                             timestamp=datetime.fromtimestamp(item.get("time")),
@@ -292,8 +308,8 @@ def populate_favorites(da: DeviantArt):
                     else:
                         offset = metadata.get("next_offset", 0)
 
-                # Throttle API calls to avoid rate limiting
-                time.sleep(3)
+                    # Throttle API calls to avoid rate limiting
+                    time.sleep(1)
             except requests.RequestException as e:
                 logger.error(f"Error fetching metadata for {deviation_id}: {e}")
 

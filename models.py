@@ -335,6 +335,8 @@ class MotionBook:
 
 @dataclass
 class User(BaseModel):
+    table_name = "users"
+    
     userid: uuid.UUID = field(metadata={"primary_key": True})
     username: str
     usericon: str
@@ -355,7 +357,7 @@ class User(BaseModel):
 
     @classmethod
     def pk(self) -> str:
-        return "userid"
+        return ["userid"]
 
 
 @dataclass
@@ -371,6 +373,7 @@ class Deviation(BaseModel):
     is_published: Optional[bool]
     is_blocked: Optional[bool]
     author: Optional[User]
+    user_id: Optional[uuid.UUID] = field(metadata={"foreign_key": User})
     stats: Optional[Stats]
     published_time: Optional[str]
     allows_comments: Optional[bool]
@@ -407,7 +410,6 @@ class DeviationActivity(BaseModel):
 
     timestamp: datetime
 
-    user: User
 
 
 
@@ -457,6 +459,7 @@ class DeviationMetadata(BaseModel):
     deviationid: uuid.UUID = field(metadata={"primary_key": True})
     printid: Optional[uuid.UUID]
     author: User
+    user_id: Optional[uuid.UUID] = field(metadata={"foreign_key": User})
     is_watching: bool
     title: str
     description: str

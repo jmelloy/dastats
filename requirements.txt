@@ -1,6 +1,6 @@
 requests
 duckdb
-flask
+Flask
 pandas
 numpy
 black

@@ -6,11 +6,10 @@ import json
 import logging
 from datetime import datetime
 import pandas as pd
-
-from models import Deviation, DeviationActivity, Select
+from typing import Iterator
+from models import Deviation, DeviationActivity, Select, DeviationMetadata
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 # Constants for DeviantArt API
 API_BASE_URL = "https://www.deviantart.com/api/v1/oauth2"
@@ -31,6 +30,7 @@ def raise_for_status(response):
         logger.warning(response.text)
         raise
     return response
+
 
 
 class DeviantArt:
@@ -55,6 +55,7 @@ class DeviantArt:
                 self.client_secret = data["client_secret"]
 
     def authorization_url(self):
+        logger.info(f"Authorization URL: {AUTHORIZATION_BASE_URL}?client_id={self.client_id}&redirect_uri={REDIRECT_URI}&response_type=code&scope=browse")
         return f"{AUTHORIZATION_BASE_URL}?client_id={self.client_id}&redirect_uri={REDIRECT_URI}&response_type=code&scope=browse"
 
     def check_token(self):
@@ -93,6 +94,11 @@ class DeviantArt:
         # Exchange the code for a token
         if not self.client_id or not self.client_secret:
             raise ValueError("Client ID and Client Secret not set.")
+        logger.info(f"Updating access token with code: {code}")
+        logger.info(f"Client ID: {self.client_id}")
+        logger.info(f"Redirect URI: {REDIRECT_URI}")
+        logger.info(f"Grant Type: authorization_code")
+
         token_response = raise_for_status(
             requests.post(
                 TOKEN_URL,
@@ -106,6 +112,8 @@ class DeviantArt:
             )
         )
 
+        logger.info(f"Token response: {token_response.json()}")
+
         self.set_token(token_response.json())
 
         return token_response.json()
@@ -116,6 +124,11 @@ class DeviantArt:
 
         if not self.refresh_token:
             raise ValueError("No refresh token found.")
+
+        logger.info(f"Refreshing access token with refresh token: {self.refresh_token}")
+        logger.info(f"Client ID: {self.client_id}")
+        logger.info(f"Client Secret: {self.client_secret}")
+        logger.info(f"Grant Type: refresh_token")
 
         token_response = raise_for_status(
             requests.post(
@@ -170,17 +183,23 @@ class DeviantArt:
         }
         return raise_for_status(requests.get(url, params=params)).json()
 
-    def get_metadata(self, deviation_ids: list):
-        url = f"{API_BASE_URL}/deviation/metadata"
-        params = {
-            "deviationids": ",".join(deviation_ids),
-            "access_token": self.access_token,
-            "ext_camera": "true",
-            "ext_stats": "true",
-            "ext_collection": "true",
-            "ext_gallery": "true",
-        }
-        return raise_for_status(requests.get(url, params=params)).json()
+    def get_metadata(self, deviation_ids: list) -> Iterator[DeviationMetadata]:
+        batch_size = 10
+
+        for i in range(0, len(deviation_ids), batch_size):
+            batch = deviation_ids[i : i + batch_size]
+            url = f"{API_BASE_URL}/deviation/metadata"
+            params = {
+                "deviationids": ",".join(batch),
+                "access_token": self.access_token,
+                "ext_camera": "true",
+                "ext_stats": "true",
+                "ext_collection": "true",
+                "ext_gallery": "true",
+            }
+            response = raise_for_status(requests.get(url, params=params))
+            for item in response.json().get("metadata", []):
+                yield DeviationMetadata.from_json(item)
 
     def whoami(self):
         return raise_for_status(
@@ -206,6 +225,9 @@ def populate_gallery(da: DeviantArt, gallery="all"):
 
 def populate_metadata(da: DeviantArt):
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
+        logging.info(DeviationMetadata.create_table_sql())
+        db.execute(DeviationMetadata.create_table_sql())
+
         offset = 0
         rows = [1]
         limit = 10
@@ -215,12 +237,10 @@ def populate_metadata(da: DeviantArt):
             ).fetchall()
 
             deviation_ids = [row[0] for row in rows]
-            response = da.get_metadata(deviation_ids)
-
-            results = response.get("results", [])
-            for item in results:
-                deviation = Deviation.from_json(item)
-                deviation.insert(db, duplicate="deviationid")
+            for response in da.get_metadata(deviation_ids):
+                results = response.get("metadata", [])
+                for item in results:
+                    item.insert(db, duplicate="deviationid")
 
         # Throttle API calls to avoid rate limiting
         time.sleep(1)
@@ -230,6 +250,7 @@ def populate_favorites(da: DeviantArt):
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
         logger.info(DeviationActivity.create_table_sql())
         db.execute(DeviationActivity.create_table_sql())
+
         select = (
             Select(
                 Deviation,
@@ -276,14 +297,14 @@ def populate_favorites(da: DeviantArt):
                         offset = metadata.get("next_offset", 0)
 
                 # Throttle API calls to avoid rate limiting
-                time.sleep(1)
+                time.sleep(3)
             except requests.RequestException as e:
                 logger.error(f"Error fetching metadata for {deviation_id}: {e}")
 
 
 def populate(da: DeviantArt):
     populate_gallery(da, gallery="all")
-    # populate_metadata(da)
+    populate_metadata(da)
     populate_favorites(da)
 
 
@@ -298,6 +319,7 @@ if __name__ == "__main__":
     da.check_token()
 
     populate_gallery(da, gallery="all")
+    populate_metadata(da)
     populate_favorites(da)
 
     print("Data collection completed.")

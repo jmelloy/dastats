@@ -8,6 +8,7 @@ from sql import top_by_activity, get_deviation_activity
 import multiprocessing
 import threading
 import time
+import json
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -15,7 +16,10 @@ da = DeviantArt()
 
 import logging
 
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 p = None
 
@@ -44,11 +48,24 @@ def populate_hourly():
 
 @app.route("/")
 def index():
+    global da
+
     if not os.path.exists(".credentials.json"):
         return render_template("credentials.html")
-    else:
-        return redirect("/stats/")
+    
+    da = DeviantArt()
 
+    logger.info("Credentials set")
+
+    if not os.path.exists(".token.json"):
+        logger.info("No token found, redirecting to authorization")
+        return redirect(da.authorization_url())
+
+    t = threading.Thread(target=populate_da)
+    t.start()
+    logger.info("Population thread started")
+    
+    return redirect("/stats/")
 
 # OAuth configuration
 @app.route("/login", methods=["POST"])
@@ -62,9 +79,6 @@ def login():
         return "Error: Missing client_id or client_secret."
     da.set_credentials(client_id, client_secret)
 
-    p = multiprocessing.Process(target=populate_da)
-    p.start()
-
     return redirect(da.authorization_url())
 
 
@@ -75,7 +89,10 @@ def callback():
     if not code:
         return "Error: No code received."
 
+    logger.info(f"Code received: {code}")
+
     data = da.update_access_token(code)
+    logger.info(f"Token updated: {data}")
     return redirect("/stats/")
 
 
@@ -113,5 +130,7 @@ def get_sparkline_data():
 if __name__ == "__main__":
     t = threading.Thread(target=populate_hourly)
     t.start()
+
+    logger.info("Starting app")
 
     app.run(port=8080, debug=True)

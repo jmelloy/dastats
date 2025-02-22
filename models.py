@@ -413,3 +413,70 @@ class DeviationActivity(BaseModel):
     timestamp: datetime
 
     user: ActivityUser
+
+
+
+@dataclass
+class Tag:
+    tag_name: str
+    sponsored: bool
+    sponsor: str
+
+
+@dataclass
+class Submission:
+    creation_time: str
+    category: str
+    file_size: Optional[str]
+    resolution: Optional[str]
+
+@dataclass
+class Stats:
+    views: int
+    views_today: Optional[int]
+    favourites: int
+    comments: int
+    downloads: int
+
+@dataclass
+class Camera:
+    pass
+
+@dataclass
+class Collection:
+    folderid: uuid.UUID
+    name: str
+
+@dataclass
+class Gallery:
+    folderid: uuid.UUID
+    name: str
+
+
+
+
+@dataclass
+class DeviationMetadata(BaseModel):
+    table_name = "deviation_metadata"
+
+    deviationid: uuid.UUID = field(metadata={"primary_key": True})
+    printid: Optional[uuid.UUID]
+    author: DeviationUser
+    is_watching: bool
+    title: str
+    description: str
+    license: str
+    allows_comments: bool
+    tags: List[Tag]
+    is_favourited: bool
+    is_mature: bool
+    mature_level: Optional[str]
+    mature_classification: Optional[List[str]]
+    submission: Optional[Submission]
+    stats: Optional[Stats]
+    camera: Optional[Dict[str, Any]]
+    collections: Optional[List[Collection]]
+    galleries: Optional[List[Gallery]]
+    can_post_comment: bool
+
+

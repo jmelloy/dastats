@@ -232,6 +232,15 @@ def populate_gallery(da: DeviantArt, gallery="all"):
 
             item.insert(db, duplicate="deviationid")
 
+            if item.thumbs:
+                thumb = item.thumbs[0]
+
+                os.makedirs("thumbs", exist_ok=True)
+                res = requests.get(thumb.src)
+                if res.status_code == 200:
+                    with open(f"thumbs/{item.deviationid}.jpg", "wb") as F:
+                        F.write(res.content)
+
 
 def populate_metadata(da: DeviantArt):
     with duckdb.connect("deviantart_data.db", read_only=False) as db:

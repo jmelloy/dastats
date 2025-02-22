@@ -238,9 +238,21 @@ def populate_metadata(da: DeviantArt):
         logging.info(DeviationMetadata.create_table_sql())
         db.execute(DeviationMetadata.create_table_sql())
 
-        rows = db.execute(
-                Select(Deviation, ["deviationid"]).sql()
-            ).fetchall()
+        select = (
+            Select(
+                Deviation,
+                [
+                    "deviationid",
+                    "stats.favourites",
+                    f"{DeviationMetadata.table_name}.stats.favourites",
+                ],
+            )
+            .join(DeviationMetadata, on="deviationid", how="left")
+            .where(f"stats.favourites is distinct from {DeviationMetadata.table_name}.stats.favourites")
+        )
+        logger.info(select.sql())
+
+        rows = db.execute(select.sql()).fetchall()
 
         logger.info(f"Fetching metadata for {len(rows)} deviations")
 

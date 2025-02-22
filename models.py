@@ -180,7 +180,7 @@ class BaseModel:
                 continue
             value = data.get(field_name)
             if hasattr(field_type, "__dataclass_fields__") and isinstance(value, dict):
-                init_args[field_name] = field_type.from_json(value)  # Nested dataclass
+                init_args[field_name] = value # field_type.from_json(value)  # Nested dataclass
             elif field_type == Optional[List[Any]] and isinstance(value, list):
                 init_args[field_name] = [
                     field_type.__args__[0](**item) if isinstance(item, dict) else item
@@ -333,30 +333,25 @@ class DailyDeviation:
 class MotionBook:
     embed_url: str
 
-
 @dataclass
-class DeviationUser(BaseModel):
+class User(BaseModel):
     userid: uuid.UUID = field(metadata={"primary_key": True})
     username: str
     usericon: str
     type: str
-
-    @classmethod
-    def from_json(cls, data: Dict[str, Any]) -> "DeviationUser":
-        return BaseModel.from_json(cls, data)
-
-
-@dataclass
-class ActivityUser:
-    userid: uuid.UUID = field(metadata={"primary_key": True})
-    username: str
-    usericon: str
-    type: str
+    is_watching: Optional[bool]
     is_subscribed: Optional[bool]
+    details: Optional[Dict[str, Any]]
+    geo: Optional[Dict[str, Any]]
+    profile: Optional[Dict[str, Any]]
+    stats: Optional[Dict[str, Any]]
+    sidebar: Optional[Dict[str, Any]]
+    session: Optional[Dict[str, Any]]
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]) -> "ActivityUser":
+    def from_json(cls, data: Dict[str, Any]) -> "User":
         return BaseModel.from_json(cls, data)
+
 
     @classmethod
     def pk(self) -> str:
@@ -375,7 +370,7 @@ class Deviation(BaseModel):
     is_deleted: bool
     is_published: Optional[bool]
     is_blocked: Optional[bool]
-    author: Optional[DeviationUser]
+    author: Optional[User]
     stats: Optional[Stats]
     published_time: Optional[str]
     allows_comments: Optional[bool]
@@ -412,7 +407,7 @@ class DeviationActivity(BaseModel):
 
     timestamp: datetime
 
-    user: ActivityUser
+    user: User
 
 
 
@@ -461,7 +456,7 @@ class DeviationMetadata(BaseModel):
 
     deviationid: uuid.UUID = field(metadata={"primary_key": True})
     printid: Optional[uuid.UUID]
-    author: DeviationUser
+    author: User
     is_watching: bool
     title: str
     description: str

@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 import pandas as pd
 from typing import Iterator
-from models import Deviation, DeviationActivity, Select, DeviationMetadata
+from models import Deviation, DeviationActivity, Select, DeviationMetadata, User
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +190,7 @@ class DeviantArt:
             batch = deviation_ids[i : i + batch_size]
             url = f"{API_BASE_URL}/deviation/metadata"
             params = {
-                "deviationids": ",".join(batch),
+                "deviationids": batch,
                 "access_token": self.access_token,
                 "ext_camera": "true",
                 "ext_stats": "true",
@@ -200,6 +200,8 @@ class DeviantArt:
             response = raise_for_status(requests.get(url, params=params))
             for item in response.json().get("metadata", []):
                 yield DeviationMetadata.from_json(item)
+            
+            time.sleep(1)
 
     def whoami(self):
         return raise_for_status(
@@ -228,23 +230,13 @@ def populate_metadata(da: DeviantArt):
         logging.info(DeviationMetadata.create_table_sql())
         db.execute(DeviationMetadata.create_table_sql())
 
-        offset = 0
-        rows = [1]
-        limit = 10
-        while rows:
-            rows = db.execute(
-                Select(Deviation, ["deviationid"]).sql(offset=offset, limit=limit)
+        rows = db.execute(
+                Select(Deviation, ["deviationid"]).sql()
             ).fetchall()
 
-            deviation_ids = [row[0] for row in rows]
-            for response in da.get_metadata(deviation_ids):
-                results = response.get("metadata", [])
-                for item in results:
-                    item.insert(db, duplicate="deviationid")
-
-        # Throttle API calls to avoid rate limiting
-        time.sleep(1)
-
+        deviation_ids = [str(row[0]) for row in rows]
+        for item in da.get_metadata(deviation_ids):
+            item.insert(db, duplicate="deviationid")
 
 def populate_favorites(da: DeviantArt):
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
@@ -303,6 +295,9 @@ def populate_favorites(da: DeviantArt):
 
 
 def populate(da: DeviantArt):
+    with duckdb.connect("deviantart_data.db", read_only=False) as db:
+        logging.info(User.create_table_sql())
+        db.execute(User.create_table_sql())
     populate_gallery(da, gallery="all")
     populate_metadata(da)
     populate_favorites(da)
@@ -318,7 +313,7 @@ if __name__ == "__main__":
     da = DeviantArt()
     da.check_token()
 
-    populate_gallery(da, gallery="all")
+    # populate_gallery(da, gallery="all")
     populate_metadata(da)
     populate_favorites(da)
 

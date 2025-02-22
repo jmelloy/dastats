@@ -13,6 +13,8 @@ Redirect Whitelist: http://localhost:8080/callback
 Original URI Whitelist: http://localhost:8080/login
 ```
 
+Note: a lot of things try to run on port 8080, so you could try this on a different port. It doesn't really matter, they just all have to be consistent.
+
 Second, get the secret key from (User -> Settings -> My Applications) [https://www.deviantart.com/developers/apps]
 
 ![Application Setup](screenshots/ClientSecret.png?raw=true)
@@ -34,4 +36,4 @@ Then it should take you to the /stats/ page [http://127.0.0.1:8080/stats/]
 
 ```
 
-```
+After running through the login process, you can also run `python da.py` to populate the database. This will take a while, but it will be faster next time.

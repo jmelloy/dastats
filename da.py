@@ -197,7 +197,9 @@ class DeviantArt:
                 "ext_collection": "true",
                 "ext_gallery": "true",
             }
+            logger.info(f"Fetching metadata for {len(batch)} deviations")
             response = raise_for_status(requests.get(url, params=params))
+            logger.info(f"Received metadata for {len(response.json().get('metadata', []))} deviations")
             for item in response.json().get("metadata", []):
                 yield DeviationMetadata.from_json(item)
             
@@ -233,6 +235,8 @@ def populate_metadata(da: DeviantArt):
         rows = db.execute(
                 Select(Deviation, ["deviationid"]).sql()
             ).fetchall()
+
+        logger.info(f"Fetching metadata for {len(rows)} deviations")
 
         deviation_ids = [str(row[0]) for row in rows]
         for item in da.get_metadata(deviation_ids):

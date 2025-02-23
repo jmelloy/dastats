@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 import pandas as pd
 from typing import Iterator
-from models import Deviation, DeviationActivity, Select, DeviationMetadata, User
+from models import Deviation, DeviationActivity, Select, DeviationMetadata, User, Thumbnail
 
 logger = logging.getLogger(__name__)
 
@@ -187,23 +187,25 @@ class DeviantArt:
         batch_size = 10
 
         for i in range(0, len(deviation_ids), batch_size):
-            batch = deviation_ids[i : i + batch_size]
-            url = f"{API_BASE_URL}/deviation/metadata"
-            params = {
-                "deviationids": batch,
-                "access_token": self.access_token,
-                "ext_camera": "true",
-                "ext_stats": "true",
-                "ext_collection": "true",
-                "ext_gallery": "true",
-            }
-            logger.info(f"Fetching metadata for {len(batch)} deviations")
-            response = raise_for_status(requests.get(url, params=params))
-            logger.info(f"Received metadata for {len(response.json().get('metadata', []))} deviations")
-            for item in response.json().get("metadata", []):
-                yield DeviationMetadata.from_json(item)
-            
-            time.sleep(1)
+            batch = deviation_ids[i: i + batch_size]
+            if batch:
+                url = f"{API_BASE_URL}/deviation/metadata"
+                params = {
+                    "deviationids[]": batch,
+                    "access_token": self.access_token,
+                    "ext_camera": "true",
+                    "ext_stats": "true",
+                    "ext_collection": "true",
+                    "ext_gallery": "true",
+                }
+                logger.info(f"Fetching metadata for {len(batch)} deviations - {batch[0]} - {batch[-1]}")
+                response = raise_for_status(requests.get(url, params=params))
+                metadata = response.json().get("metadata", [])
+
+                for item in metadata:
+                    yield DeviationMetadata.from_json(item)
+                
+                time.sleep(1)
 
     def whoami(self):
         return raise_for_status(
@@ -226,6 +228,7 @@ def populate_gallery(da: DeviantArt, gallery="all"):
             logger.debug(item)
             author = item.author
             if author:
+                author = User.from_json(author)
                 author.insert(db, duplicate="userid")
                 item.user_id = author.userid
                 item.author = None
@@ -236,6 +239,7 @@ def populate_gallery(da: DeviantArt, gallery="all"):
                 thumb = item.thumbs[0]
 
                 os.makedirs("thumbs", exist_ok=True)
+                thumb = Thumbnail.from_json(thumb)
                 res = requests.get(thumb.src)
                 if res.status_code == 200:
                     with open(f"thumbs/{item.deviationid}.jpg", "wb") as F:
@@ -252,12 +256,12 @@ def populate_metadata(da: DeviantArt):
                 Deviation,
                 [
                     "deviationid",
-                    "stats.favourites",
+                    f"{Deviation.table_name}.stats.favourites",
                     f"{DeviationMetadata.table_name}.stats.favourites",
                 ],
             )
             .join(DeviationMetadata, on="deviationid", how="left")
-            .where(f"stats.favourites is distinct from {DeviationMetadata.table_name}.stats.favourites")
+            .where(f"{Deviation.table_name}.stats.favourites is distinct from {DeviationMetadata.table_name}.stats.favourites")
         )
         logger.info(select.sql())
 
@@ -267,9 +271,9 @@ def populate_metadata(da: DeviantArt):
 
         deviation_ids = [str(row[0]) for row in rows]
         for item in da.get_metadata(deviation_ids):
-            logger.debug(item)
             user = item.author
             if user:
+                user = User.from_json(user)
                 user.insert(db, duplicate="userid")
                 item.user_id = user.userid
                 item.author = None
@@ -315,6 +319,7 @@ def populate_favorites(da: DeviantArt):
                     for item in results:
                         user = User.from_json(item.get("user"))
                         if user:
+                            user = User.from_json(item.get("user"))
                             user.insert(db, duplicate="userid")
                             
                         a = DeviationActivity(
@@ -339,7 +344,7 @@ def populate(da: DeviantArt):
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
         logging.info(User.create_table_sql())
         db.execute(User.create_table_sql())
-    populate_gallery(da, gallery="all")
+    # populate_gallery(da, gallery="all")
     populate_metadata(da)
     populate_favorites(da)
 
@@ -354,9 +359,7 @@ if __name__ == "__main__":
     da = DeviantArt()
     da.check_token()
 
-    # populate_gallery(da, gallery="all")
-    populate_metadata(da)
-    populate_favorites(da)
+    populate(da)
 
     print("Data collection completed.")
 

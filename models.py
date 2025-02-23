@@ -306,7 +306,7 @@ class Content:
 
 
 @dataclass
-class Thumbnail:
+class Thumbnail(BaseModel):
     src: str
     height: int
     width: int
@@ -349,11 +349,6 @@ class User(BaseModel):
     stats: Optional[Dict[str, Any]]
     sidebar: Optional[Dict[str, Any]]
     session: Optional[Dict[str, Any]]
-
-    @classmethod
-    def from_json(cls, data: Dict[str, Any]) -> "User":
-        return BaseModel.from_json(cls, data)
-
 
     @classmethod
     def pk(self) -> str:

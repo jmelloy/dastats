@@ -29,6 +29,7 @@ def populate_da():
     try:
         da.check_token()
         p = multiprocessing.Process(target=populate, args=(da,))
+        p.daemon = True
         p.start()
     except Exception as e:
         print(e)
@@ -60,10 +61,6 @@ def index():
     if not os.path.exists(".token.json"):
         logger.info("No token found, redirecting to authorization")
         return redirect(da.authorization_url())
-
-    t = threading.Thread(target=populate_da)
-    t.start()
-    logger.info("Population thread started")
 
     return redirect("/stats/")
 
@@ -133,6 +130,7 @@ def thumbs(deviation_id):
 
 if __name__ == "__main__":
     t = threading.Thread(target=populate_hourly)
+    t.daemon = True
     t.start()
 
     logger.info("Starting app")

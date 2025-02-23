@@ -243,117 +243,112 @@ class DeviantArt:
         ).json()
 
 
-def populate_gallery(da: DeviantArt, gallery="all"):
-    # Initialize DuckDB connection
-    with duckdb.connect("deviantart_data.db", read_only=False) as db:
-        logging.info(Deviation.create_table_sql())
-        db.execute(Deviation.create_table_sql())
+def populate_gallery(da: DeviantArt, db: duckdb.DuckDBPyConnection, gallery="all"):
+    logging.info(Deviation.create_table_sql())
+    db.execute(Deviation.create_table_sql())
 
-        for item in da.get_all_deviations(gallery=gallery):
-            logger.debug(item)
-            author = item.author
-            if author:
-                author = User.from_json(author)
-                author.insert(db, duplicate="userid")
-                item.user_id = author.userid
-                item.author = None
+    for item in da.get_all_deviations(gallery=gallery):
+        logger.debug(item)
+        author = item.author
+        if author:
+            author = User.from_json(author)
+            author.insert(db, duplicate="userid")
+            item.user_id = author.userid
 
-            item.insert(db, duplicate="deviationid")
+        item.insert(db, duplicate="deviationid")
 
-            if item.thumbs:
-                thumb = item.thumbs[0]
+        if item.thumbs:
+            thumb = item.thumbs[0]
 
-                os.makedirs("thumbs", exist_ok=True)
-                thumb = Thumbnail.from_json(thumb)
-                res = requests.get(thumb.src)
-                if res.status_code == 200:
-                    with open(f"thumbs/{item.deviationid}.jpg", "wb") as F:
-                        F.write(res.content)
+            os.makedirs("thumbs", exist_ok=True)
+            thumb = Thumbnail.from_json(thumb)
+            res = requests.get(thumb.src)
+            if res.status_code == 200:
+                with open(f"thumbs/{item.deviationid}.jpg", "wb") as F:
+                    F.write(res.content)
 
 
-def populate_metadata(da: DeviantArt):
-    with duckdb.connect("deviantart_data.db", read_only=False) as db:
-        logging.info(DeviationMetadata.create_table_sql())
-        db.execute(DeviationMetadata.create_table_sql())
+def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
+    logging.info(DeviationMetadata.create_table_sql())
+    db.execute(DeviationMetadata.create_table_sql())
 
-        select = (
-            Select(
-                Deviation,
-                [
-                    "deviationid",
-                    f"{Deviation.table_name}.stats.favourites",
-                    f"{DeviationMetadata.table_name}.stats.favourites",
-                ],
-            )
-            .join(DeviationMetadata, on="deviationid", how="left")
-            .where(f"{Deviation.table_name}.stats.favourites is distinct from {DeviationMetadata.table_name}.stats.favourites")
+    select = (
+        Select(
+            Deviation,
+            [
+                "deviationid",
+                f"{Deviation.table_name}.stats.favourites",
+                f"{DeviationMetadata.table_name}.stats.favourites",
+            ],
         )
-        logger.info(select.sql())
+        .join(DeviationMetadata, on="deviationid", how="left")
+        .where(f"{Deviation.table_name}.stats.favourites is distinct from {DeviationMetadata.table_name}.stats.favourites")
+    )
+    logger.info(select.sql())
 
-        rows = db.execute(select.sql()).fetchall()
+    rows = db.execute(select.sql()).fetchall()
 
-        logger.info(f"Fetching metadata for {len(rows)} deviations")
+    logger.info(f"Fetching metadata for {len(rows)} deviations")
 
-        deviation_ids = [str(row[0]) for row in rows]
-        for item in da.get_metadata(deviation_ids):
-            user = item.author
+    deviation_ids = [str(row[0]) for row in rows]
+    for item in da.get_metadata(deviation_ids):
+        user = item.author
+        if user:
+            user = User.from_json(user)
+            user.insert(db, duplicate="userid")
+            item.user_id = user.userid
+
+        item.insert(db, duplicate="deviationid")
+
+def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
+    logger.info(DeviationActivity.create_table_sql())
+    db.execute(DeviationActivity.create_table_sql())
+
+    select = (
+        Select(
+            Deviation,
+            [
+                "deviationid",
+                "stats.favourites",
+                f"count({DeviationActivity.table_name}.deviationid)",
+            ],
+        )
+        .join(DeviationActivity, on="deviationid", how="left")
+        .group_by("deviationid", "stats.favourites")
+        .having(
+            f"stats.favourites <> count({DeviationActivity.table_name}.deviationid)"
+        )
+    )
+    logger.info(select.sql())
+    rows = db.execute(select.sql()).fetchall()
+
+    for deviation_id, fav, count in rows:
+        logger.info(f"Fetching /whofaved for deviation: {deviation_id}")
+        for item in da.get_whofaved(deviation_id):
+            user = User.from_json(item.get("user"))
             if user:
-                user = User.from_json(user)
-                user.insert(db, duplicate="userid")
-                item.user_id = user.userid
-                item.author = None
-
-            item.insert(db, duplicate="deviationid")
-
-def populate_favorites(da: DeviantArt):
-    with duckdb.connect("deviantart_data.db", read_only=False) as db:
-        logger.info(DeviationActivity.create_table_sql())
-        db.execute(DeviationActivity.create_table_sql())
-
-        select = (
-            Select(
-                Deviation,
-                [
-                    "deviationid",
-                    "stats.favourites",
-                    f"count({DeviationActivity.table_name}.deviationid)",
-                ],
-            )
-            .join(DeviationActivity, on="deviationid", how="left")
-            .group_by("deviationid", "stats.favourites")
-            .having(
-                f"stats.favourites <> count({DeviationActivity.table_name}.deviationid)"
-            )
-        )
-        logger.info(select.sql())
-        rows = db.execute(select.sql()).fetchall()
-
-        for deviation_id, fav, count in rows:
-            logger.info(f"Fetching /whofaved for deviation: {deviation_id}")
-            for item in da.get_whofaved(deviation_id):
                 user = User.from_json(item.get("user"))
-                if user:
-                    user = User.from_json(item.get("user"))
-                    user.insert(db, duplicate="userid")
-                    
-                    a = DeviationActivity(
-                        deviationid=deviation_id,
-                        userid=user.userid,
-                        time=item.get("time"),
-                        action="fave",
-                        timestamp=datetime.fromtimestamp(item.get("time")),
-                    )
-                    a.insert(db, ignore_conflicts=True)
-            time.sleep(1)
+                user.insert(db, duplicate="userid")
+                
+                a = DeviationActivity(
+                    deviationid=deviation_id,
+                    userid=user.userid,
+                    time=item.get("time"),
+                    action="fave",
+                    timestamp=datetime.fromtimestamp(item.get("time")),
+                )
+                a.insert(db, ignore_conflicts=True)
+        time.sleep(1)
 
 
 def populate(da: DeviantArt):
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
         logging.info(User.create_table_sql())
         db.execute(User.create_table_sql())
-    # populate_gallery(da, gallery="all")
-    populate_metadata(da)
-    populate_favorites(da)
+
+        # populate_gallery(da, db, gallery="all")
+        # populate_metadata(da, db)
+        populate_favorites(da, db)
 
 
 if __name__ == "__main__":

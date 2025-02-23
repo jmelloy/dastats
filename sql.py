@@ -1,17 +1,6 @@
 import duckdb
 from models import *
 from datetime import datetime, timedelta
-import os
-
-conn = None
-
-
-def get_connection():
-    global conn
-    if not conn and os.path.exists("deviantart_data.db"):
-        conn = duckdb.connect("deviantart_data.db", read_only=True)
-    return conn
-
 
 def top_by_activity(start_time, limit=10):
 
@@ -27,19 +16,12 @@ def top_by_activity(start_time, limit=10):
         .group_by("deviations.*")
         .order_by("count(*) desc, published_time")
     )
-    conn = get_connection()
-    if not conn:
-        logger.error("Database connection not available.")
-        return []
+    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query.sql(limit=limit))
+            columns = [col[0].lower() for col in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-    with conn.cursor() as cursor:
-        print(query.sql(limit=limit))
-
-        cursor.execute(query.sql(limit=limit))
-        columns = [col[0].lower() for col in cursor.description]
-
-        # Convert the cursor to a list of dictionaries
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def calculate_grouping_minutes(start_date, max_groups=100):
@@ -86,14 +68,8 @@ def get_deviation_activity(deviationid, start_date):
         ORDER BY ts.time_bucket
     """
 
-    conn = get_connection()
-    if not conn:
-        logger.error("Database connection not available.")
-        return []
-
-    print(query)
-    with conn.cursor() as cursor:
-        cursor.execute(query)
-
-        columns = [col[0].lower() for col in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query)
+            columns = [col[0].lower() for col in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]

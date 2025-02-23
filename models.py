@@ -7,7 +7,6 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-
 class Select:
     def __init__(self, model: Union["BaseModel", str], columns="*"):
         if isinstance(model, str):
@@ -194,6 +193,7 @@ class BaseModel:
     def select(
         cls, conn, where: str = "", offset=None, limit=None
     ) -> List["BaseModel"]:
+        
         return conn.execute(Select(cls, "*").where(where).sql(offset, limit)).fetchall()
 
     def insert(
@@ -224,14 +224,45 @@ class BaseModel:
 
     def update(self, conn, cols=None) -> str:
         if not cols:
-            cols = self.columnss
+            columns = {
+            col: getattr(self, col)
+            for col in self.columns
+            if col not in self.pk()
+        }
+        else:
+            columns = {
+                col: getattr(self, col)
+                for col in cols
+                if col not in self.pk()
+            }
 
-        set_clause = ", ".join(f"{f.name} = ?" for f in cols)
+        logger.info(columns)
 
-        return conn.execute(
-            f"UPDATE {self.table_name} SET {set_clause} WHERE {self.pk} = '{getattr(self, self.pk)}';",
-            [getattr(self, f.name) for f in cols],
-        )
+        pk = {
+            col: getattr(self, col)
+            for col in self.pk()
+        }
+
+        set_clause = ", ".join(f"{col} = ?" for col in columns)
+
+        where_clause = " AND ".join(f"{col} = ?" for col in pk)
+
+        sql = f"UPDATE {self.table_name} SET {set_clause} WHERE {where_clause};"
+
+        logger.info(sql)
+
+        return conn.execute(sql, list(columns.values()) + list(pk.values()))
+
+    def upsert(self, conn, cols=None) -> str:
+        if not cols:
+            cols = self.columns
+
+        upd = self.update(conn, cols)
+        if upd.rowcount == 0:
+            return self.insert(conn, ignore_conflicts=True, duplicate=self.pk())
+        
+        return upd
+
 
     def delete(self, conn) -> str:
         return conn.execute(

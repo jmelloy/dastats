@@ -173,15 +173,40 @@ class DeviantArt:
             for item in results:
                 yield Deviation.from_json(item)
 
-    def get_whofaved(self, deviation_id, offset=0):
+    def get_whofaved(self, deviation_id):
         url = f"{API_BASE_URL}/deviation/whofaved"
 
-        params = {
-            "deviationid": deviation_id,
-            "offset": offset,
-            "access_token": self.access_token,
-        }
-        return raise_for_status(requests.get(url, params=params)).json()
+        limit = 50
+        has_more = True
+        offset = 0
+
+        sleep_time = 1
+
+        while has_more:
+            params = {
+                "deviationid": deviation_id,
+                "offset": offset,
+                "limit": limit,
+                "access_token": self.access_token,
+            }
+            try:
+                response = raise_for_status(requests.get(url, params=params))
+                metadata = response.json()
+                has_more = metadata.get("has_more", False)
+                offset = metadata.get("next_offset", 0)
+                results = metadata.get("results", [])
+                for item in results:
+                    yield item
+                
+                sleep_time = max(1, sleep_time / 2) 
+            except Exception as e:
+                logger.error(f"Error fetching whofaved for {deviation_id}: {e}")
+                if e.response.status_code == 429:
+                    logger.info(f"Rate limited, sleeping for {sleep_time} seconds")
+                    time.sleep(sleep_time)
+                    sleep_time *= 2
+                else:
+                    raise e
 
     def get_metadata(self, deviation_ids: list) -> Iterator[DeviationMetadata]:
         batch_size = 10
@@ -305,39 +330,21 @@ def populate_favorites(da: DeviantArt):
 
         for deviation_id, fav, count in rows:
             logger.info(f"Fetching /whofaved for deviation: {deviation_id}")
-            try:
-                offset = 0
-                has_more = True
-                while has_more:
-                    metadata = da.get_whofaved(deviation_id, offset=offset)
-                    has_more = metadata.get("has_more", False)
-                    results = metadata.get("results", [])
-
-                    if not results:
-                        break
-
-                    for item in results:
-                        user = User.from_json(item.get("user"))
-                        if user:
-                            user = User.from_json(item.get("user"))
-                            user.insert(db, duplicate="userid")
-                            
-                        a = DeviationActivity(
-                            deviationid=deviation_id,
-                            userid=item.get("user", {}).get("userid"),
-                            time=item.get("time"),
-                            action="fave",
-                            timestamp=datetime.fromtimestamp(item.get("time")),
-                        )
-                        a.insert(db, ignore_conflicts=True)
-
-                    else:
-                        offset = metadata.get("next_offset", 0)
-
-                    # Throttle API calls to avoid rate limiting
-                    time.sleep(1)
-            except requests.RequestException as e:
-                logger.error(f"Error fetching metadata for {deviation_id}: {e}")
+            for item in da.get_whofaved(deviation_id):
+                user = User.from_json(item.get("user"))
+                if user:
+                    user = User.from_json(item.get("user"))
+                    user.insert(db, duplicate="userid")
+                    
+                    a = DeviationActivity(
+                        deviationid=deviation_id,
+                        userid=user.userid,
+                        time=item.get("time"),
+                        action="fave",
+                        timestamp=datetime.fromtimestamp(item.get("time")),
+                    )
+                    a.insert(db, ignore_conflicts=True)
+            time.sleep(1)
 
 
 def populate(da: DeviantArt):

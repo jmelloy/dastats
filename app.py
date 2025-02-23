@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, jsonify, render_template
+from flask import Flask, request, redirect, jsonify, render_template, send_from_directory
 from da import DeviantArt, populate
 
 import os
@@ -64,7 +64,7 @@ def index():
     t = threading.Thread(target=populate_da)
     t.start()
     logger.info("Population thread started")
-    
+
     return redirect("/stats/")
 
 # OAuth configuration
@@ -126,6 +126,10 @@ def get_sparkline_data():
         return jsonify({"status": "success", "data": sparkline_data})
     return jsonify({"status": "error", "message": "Invalid event ID"}), 400
 
+
+@app.route("/thumbs/<deviation_id>")
+def thumbs(deviation_id):
+    return send_from_directory(os.path.join(os.getcwd(), "thumbs"), f"{deviation_id}.jpg")
 
 if __name__ == "__main__":
     t = threading.Thread(target=populate_hourly)

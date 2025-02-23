@@ -3,7 +3,7 @@ from da import DeviantArt, populate
 
 import os
 from datetime import datetime
-from sql import top_by_activity, get_deviation_activity
+from sql import top_by_activity, get_deviation_activity, get_publication_data
 
 import multiprocessing
 import threading
@@ -127,6 +127,10 @@ def get_sparkline_data():
 @app.route("/thumbs/<deviation_id>")
 def thumbs(deviation_id):
     return send_from_directory(os.path.join(os.getcwd(), "thumbs"), f"{deviation_id}.jpg")
+
+@app.route("/get-publication-data")
+def get_by_publication_date():
+    return jsonify({"status": "success", "data": get_publication_data()})
 
 if __name__ == "__main__":
     t = threading.Thread(target=populate_hourly)

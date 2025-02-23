@@ -173,12 +173,11 @@ class DeviantArt:
             for item in results:
                 yield Deviation.from_json(item)
 
-    def get_whofaved(self, deviation_id):
+    def get_whofaved(self, deviation_id, offset=0):
         url = f"{API_BASE_URL}/deviation/whofaved"
 
         limit = 50
         has_more = True
-        offset = 0
 
         sleep_time = 1
 
@@ -323,8 +322,8 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
     rows = db.execute(select.sql()).fetchall()
 
     for deviation_id, fav, count in rows:
-        logger.info(f"Fetching /whofaved for deviation: {deviation_id}")
-        for item in da.get_whofaved(deviation_id):
+        logger.info(f"Fetching /whofaved for deviation: {deviation_id} {count} {fav}")
+        for item in da.get_whofaved(deviation_id, offset=count - 1):
             user = User.from_json(item.get("user"))
             if user:
                 user = User.from_json(item.get("user"))
@@ -346,8 +345,8 @@ def populate(da: DeviantArt):
         logging.info(User.create_table_sql())
         db.execute(User.create_table_sql())
 
-        # populate_gallery(da, db, gallery="all")
-        # populate_metadata(da, db)
+        populate_gallery(da, db, gallery="all")
+        populate_metadata(da, db)
         populate_favorites(da, db)
 
 

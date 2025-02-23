@@ -16,7 +16,7 @@ def top_by_activity(start_time, limit=10):
         .group_by("deviations.*")
         .order_by("count(*) desc, published_time")
     )
-    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
+    with duckdb.connect("deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}) as conn:
         with conn.cursor() as cursor:
             cursor.execute(query.sql(limit=limit))
             columns = [col[0].lower() for col in cursor.description]
@@ -68,8 +68,23 @@ def get_deviation_activity(deviationid, start_date):
         ORDER BY ts.time_bucket
     """
 
-    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
+    with duckdb.connect("deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}) as conn:
         with conn.cursor() as cursor:
             cursor.execute(query)
             columns = [col[0].lower() for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+def get_publication_data():
+    query = """
+        SELECT to_timestamp(published_time::bigint)::date as date, COUNT(*) as count 
+        FROM deviations
+        GROUP BY 1
+        ORDER BY 1
+    """
+    
+    with duckdb.connect("deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query)
+            columns = [col[0].lower() for col in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+

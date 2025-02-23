@@ -22,10 +22,46 @@
         <a class="navbar-brand" href="/">DeviantArt Statistics</a>
       </div>
     </nav>
-    <div class="container mt-5">
-      <h1 class="text-center">Popular Deviations</h1>
+    <div class="container mt-8">
+      <div class="row">
+        <div class="col-md-12" style="height: 200px">
+          <h2 class="text-center">Deviations by Publication Date</h2>
+          <canvas id="publicationChart"></canvas>
+          <script>
+            document.addEventListener("DOMContentLoaded", () => {
+              fetch("/get-publication-data")
+                .then((response) => response.json())
+                .then((data) => {
+                  new Chart("publicationChart", {
+                    type: "bar",
+                    data: {
+                      labels: data.data.map((d) =>
+                        new Date(d.date).toLocaleDateString()
+                      ),
+                      datasets: [
+                        {
+                          label: "Number of Deviations",
+                          data: data.data.map((d) => d.count),
+                          backgroundColor: "rgba(54, 162, 235, 0.5)",
+                          borderColor: "rgba(54, 162, 235, 1)",
+                        },
+                      ],
+                    },
+                    options: {
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      scales: { y: { beginAtZero: true } },
+                    },
+                  });
+                });
+            });
+          </script>
+        </div>
+      </div>
+
+      <h2 class="text-center">Popular Deviations</h2>
       <div class="row mt-4">
-        <div class="col-md-6 offset-md-3">
+        <div class="col-md-4">
           <form
             id="main-form"
             hx-post="/update-table"

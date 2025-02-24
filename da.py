@@ -15,6 +15,7 @@ from models import (
     User,
     Collection,
     Gallery,
+    DeviationStats,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,8 +61,6 @@ class DeviantArt:
                 self.access_token = data["access_token"]
                 self.refresh_token = data["refresh_token"]
                 self.expires = data.get("expires_at", 0)
-
-            self.check_token()
 
     def authorization_url(self):
         logger.info(
@@ -167,8 +166,7 @@ class DeviantArt:
 
         return response.json()
 
-    def get_all_deviations(self, gallery="all"):
-        offset = 0
+    def get_all_deviations(self, gallery="all", offset=0):
         limit = 24
         has_more = True
         while has_more:
@@ -255,8 +253,10 @@ class DeviantArt:
         ).json()
 
 
-def populate_gallery(da: DeviantArt, db: duckdb.DuckDBPyConnection, gallery="all"):
-    for item in da.get_all_deviations(gallery=gallery):
+def populate_gallery(
+    da: DeviantArt, db: duckdb.DuckDBPyConnection, gallery="all", offset=0
+):
+    for item in da.get_all_deviations(gallery=gallery, offset=offset):
         logger.debug(item)
         author = item.author
         if author:
@@ -278,21 +278,10 @@ def populate_gallery(da: DeviantArt, db: duckdb.DuckDBPyConnection, gallery="all
 
 
 def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
-    select = (
-        Select(
-            Deviation,
-            [
-                "deviationid",
-                f"{Deviation.table_name}.stats.favourites",
-                f"{DeviationMetadata.table_name}.stats.favourites",
-            ],
-        )
-        .join(DeviationMetadata, on="deviationid", how="left")
-        .where(
-            f"{Deviation.table_name}.stats.favourites is distinct from {DeviationMetadata.table_name}.stats.favourites"
-        )
+    select = Select(
+        Deviation,
+        ["deviationid"],
     )
-    logger.info(select.sql())
 
     rows = db.execute(select.sql()).fetchall()
 
@@ -312,6 +301,18 @@ def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
 
         for g in item.galleries:
             r = g.insert(db, conflict_mode="replace")
+
+        db.execute(
+            f"UPDATE deviations SET stats = ?, title = ? WHERE deviationid = ?",
+            (
+                {
+                    "favourites": item.stats.favourites,
+                    "comments": item.stats.comments,
+                },
+                item.title,
+                item.deviationid,
+            ),
+        )
 
 
 def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
@@ -363,6 +364,7 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
 
 
 def populate(da: DeviantArt):
+    da.check_token()
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
         for table in [
             User,
@@ -375,7 +377,10 @@ def populate(da: DeviantArt):
             logging.info(table.create_table_sql())
             db.execute(table.create_table_sql())
 
-        populate_gallery(da, db, gallery="all")
+        deviations = db.execute("select count(*) from deviations").fetchone()[0]
+        logger.info(f"Deviations: {deviations}")
+
+        populate_gallery(da, db, gallery="all", offset=deviations)
         populate_metadata(da, db)
         populate_favorites(da, db)
 

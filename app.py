@@ -51,6 +51,8 @@ def populate_da():
 
 
 def populate_hourly():
+    global p
+    time.sleep(10)
     while True:
         if p:
             p.join()
@@ -167,7 +169,10 @@ def get_by_publication_date():
 
     logger.info(f"Getting publication data for {start_date} to {end_date}")
     return jsonify(
-        {"status": "success", "data": get_publication_data(start_date, end_date, gallery)}
+        {
+            "status": "success",
+            "data": get_publication_data(start_date, end_date, gallery),
+        }
     )
 
 
@@ -190,10 +195,15 @@ def get_users():
     if end_date:
         end_date = datetime.fromisoformat(end_date)
 
-    logger.info(f"Updating users for {start_date} to {end_date} with limit {limit} and gallery {gallery}")
+    logger.info(
+        f"Updating users for {start_date} to {end_date} with limit {limit} and gallery {gallery}"
+    )
 
     return jsonify(
-        {"status": "success", "data": get_user_data(start_date, end_date, limit, gallery)}
+        {
+            "status": "success",
+            "data": get_user_data(start_date, end_date, limit, gallery),
+        }
     )
 
 
@@ -201,10 +211,6 @@ if __name__ == "__main__":
     # t = threading.Thread(target=populate_hourly)
     # t.daemon = True
     # t.start()
-
-    # Enable debug logging for SQL queries
-    logging.getLogger('sql').setLevel(logging.DEBUG)
-    logging.getLogger('models').setLevel(logging.DEBUG)
 
     logger.info("Starting app")
 

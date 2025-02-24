@@ -30,10 +30,19 @@ python app.py
 
 This will spit out a URL (http://127.0.0.1:8080). Click that, and it will ask you for the secret key and client ID from step 2. This will log you into deviant art and ask for permissions.
 
-Stats will start downloading. Depending on how many deviations you have, this could take a few minutes.
+On my machine, DuckDB would not do the concurrency properly, so I had to run the stats download manually. The token file has been created in .token.json in your dastats directory.  Hit control-C to stop the app, and then run:
+```
+python da.py
+```
+
+Then, run the app again:
+
+```
+python app.py
+```
 
 Then it should take you to the /stats/ page [http://127.0.0.1:8080/stats/]
 
 ```
 
-After running through the login process, you can also run `python da.py` to populate the database. This will take a while, but it will be faster next time.
+After running through the login process, you can also run `python da.py` to populate the database. This will take a while, but it will be faster next time.  It may get rate limited by deviant art, so if that happen just stop and wait a bit.

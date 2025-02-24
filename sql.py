@@ -20,7 +20,7 @@ def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
         ],
     ).join(DeviationMetadata, on="deviationid", how="left")
 
-    if gallery != 'all':
+    if gallery != "all":
         query = query.from_clause("unnest(deviation_metadata.galleries)")
         query = query.where(f"unnest.folderid = '{gallery}'")
 
@@ -28,7 +28,12 @@ def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
         query = (
             query.join(DeviationActivity, on="deviationid", how="left")
             .select(
-                "deviationid", "deviations.title", "deviations.url", "deviations.published_time","count(*) as favorites")
+                "deviationid",
+                "deviations.title",
+                "deviations.url",
+                "deviations.published_time",
+                "count(*) as favorites",
+            )
             .group_by("all")
             .order_by("count(*) desc, deviations.published_time")
         )
@@ -37,10 +42,12 @@ def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
         if end_time:
             query = query.where(f"timestamp <= '{end_time}'")
     else:
-        query = query.order_by("deviations.stats.favourites desc, deviations.published_time")
+        query = query.order_by(
+            "deviations.stats.favourites desc, deviations.published_time"
+        )
 
     with duckdb.connect(
-        "deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}
+        "deviantart_data.db", config={"access_mode": "READ_ONLY"}
     ) as conn:
         with conn.cursor() as cursor:
             cursor.execute(query.sql(limit=limit))
@@ -59,7 +66,7 @@ def get_user_data(start_time, end_time, limit=10, gallery="all"):
         .order_by("count(*) desc")
     )
 
-    if gallery != 'all':
+    if gallery != "all":
         query = query.join(DeviationMetadata, on="deviationid")
         query = query.from_clause(" unnest(deviation_metadata.galleries)")
         query = query.where(f"unnest.folderid = '{gallery}'")
@@ -70,7 +77,7 @@ def get_user_data(start_time, end_time, limit=10, gallery="all"):
         query = query.where(f"timestamp <= '{end_time}'")
 
     with duckdb.connect(
-        "deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}
+        "deviantart_data.db", config={"access_mode": "READ_ONLY"}
     ) as conn:
         with conn.cursor() as cursor:
             cursor.execute(query.sql(limit=limit))
@@ -123,7 +130,7 @@ def get_deviation_activity(deviationid, start_date):
     """
 
     with duckdb.connect(
-        "deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}
+        "deviantart_data.db", True
     ) as conn:
         with conn.cursor() as cursor:
             cursor.execute(query)
@@ -132,7 +139,7 @@ def get_deviation_activity(deviationid, start_date):
 
 
 def get_publication_data(start_date, end_date, gallery="all"):
-    if gallery == 'all':
+    if gallery == "all":
         gallery = None
 
     if not start_date:
@@ -168,7 +175,7 @@ def get_publication_data(start_date, end_date, gallery="all"):
     """
 
     with duckdb.connect(
-        "deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}
+        "deviantart_data.db", config={"access_mode": "READ_ONLY"}
     ) as conn:
         with conn.cursor() as cursor:
             logger.debug(query)
@@ -186,7 +193,7 @@ def get_gallery_data():
         ORDER BY count(*) DESC
     """
     with duckdb.connect(
-        "deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}
+        "deviantart_data.db", config={"access_mode": "READ_ONLY"}
     ) as conn:
         with conn.cursor() as cursor:
             cursor.execute(query)

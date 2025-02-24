@@ -13,12 +13,14 @@ def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
             "deviations.title as title",
             "deviations.url as url",
             "deviations.published_time as published_time",
-            "deviations.stats.favourites as favorites",
+            "coalesce(deviation_metadata.stats.favourites, deviations.stats.favourites) as favorites",
+            "deviation_metadata.stats.views as views",
+            "deviation_metadata.stats.comments as comments",
+            "deviation_metadata.stats.downloads as downloads",
         ],
-    )
+    ).join(DeviationMetadata, on="deviationid", how="left")
 
     if gallery != 'all':
-        query = query.join(DeviationMetadata, on="deviationid")
         query = query.from_clause("unnest(deviation_metadata.galleries)")
         query = query.where(f"unnest.folderid = '{gallery}'")
 
@@ -177,8 +179,11 @@ def get_publication_data(start_date, end_date, gallery="all"):
 
 def get_gallery_data():
     query = """
-        SELECT folderid, name
-        FROM galleries
+        SELECT folderid, name || ' (' || count(*) || ')' as name
+        FROM galleries, deviation_metadata, unnest(deviation_metadata.galleries)
+        WHERE folderid = unnest.folderid
+        GROUP BY folderid, name
+        ORDER BY count(*) DESC
     """
     with duckdb.connect(
         "deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}

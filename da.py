@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 import pandas as pd
 from typing import Iterator
-from models import Deviation, DeviationActivity, Select, DeviationMetadata, User, Thumbnail
+from models import Deviation, DeviationActivity, Select, DeviationMetadata, User, Collection, Gallery
 
 logger = logging.getLogger(__name__)
 
@@ -246,18 +246,16 @@ class DeviantArt:
 
 
 def populate_gallery(da: DeviantArt, db: duckdb.DuckDBPyConnection, gallery="all"):
-    logging.info(Deviation.create_table_sql())
-    db.execute(Deviation.create_table_sql())
-
     for item in da.get_all_deviations(gallery=gallery):
         logger.debug(item)
         author = item.author
         if author:
             r = author.insert(db, conflict_mode="replace")
-            logger.debug(r.fetchall())
             item.user_id = author.userid
-
+        thumbs = item.thumbs
+        item.thumbs = None
         item.insert(db, conflict_mode="replace")
+        item.thumbs = thumbs
 
         if item.thumbs:
             thumb = item.thumbs[0]
@@ -270,9 +268,6 @@ def populate_gallery(da: DeviantArt, db: duckdb.DuckDBPyConnection, gallery="all
 
 
 def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
-    logging.info(DeviationMetadata.create_table_sql())
-    db.execute(DeviationMetadata.create_table_sql())
-
     select = (
         Select(
             Deviation,
@@ -300,10 +295,13 @@ def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
 
         item.insert(db, conflict_mode="replace")
 
-def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
-    logger.info(DeviationActivity.create_table_sql())
-    db.execute(DeviationActivity.create_table_sql())
+        for c in item.collections:
+            r = c.insert(db, conflict_mode="replace")
 
+        for g in item.galleries:
+            r = g.insert(db, conflict_mode="replace")
+
+def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
     select = (
         Select(
             Deviation,
@@ -324,7 +322,12 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
 
     for deviation_id, fav, count in rows:
         logger.info(f"Fetching /whofaved for deviation: {deviation_id} ({fav} / {count})")
-        for item in da.get_whofaved(deviation_id, offset=max(0, count - 1)):
+        if count > fav:
+            db.execute(f"DELETE FROM {DeviationActivity.table_name} WHERE deviationid = ?", (deviation_id,))
+            logger.info(f"Deleted {count - fav} rows for deviation: {deviation_id}")
+            count = 0
+
+        for item in da.get_whofaved(deviation_id, offset=count):
             user = User.from_json(item.get("user"))
             if user:
                 user = User.from_json(item.get("user"))
@@ -343,8 +346,9 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
 
 def populate(da: DeviantArt):
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
-        logging.info(User.create_table_sql())
-        db.execute(User.create_table_sql())
+        for table in [User, Deviation, DeviationMetadata, DeviationActivity, Collection, Gallery]:
+            logging.info(table.create_table_sql())
+            db.execute(table.create_table_sql())
 
         populate_gallery(da, db, gallery="all")
         populate_metadata(da, db)

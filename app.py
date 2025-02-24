@@ -3,7 +3,7 @@ from da import DeviantArt, populate
 
 import os
 from datetime import datetime
-from sql import top_by_activity, get_deviation_activity, get_publication_data
+from sql import top_by_activity, get_deviation_activity, get_publication_data, get_gallery_data
 
 import multiprocessing
 import threading
@@ -102,15 +102,20 @@ def stats():
 
 @app.route("/update-table", methods=["POST"])
 def update_table():
-    date_str = request.form.get("date")
+    start_date = request.form.get("start_date")
+    end_date = request.form.get("end_date")
     limit = request.form.get("limit", 10)
 
-    if date_str:
-        date_object = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
-        table_data = top_by_activity(date_object, limit)
+    logger.info(f"Updating table for {start_date} to {end_date} with limit {limit}")
 
-        return render_template("partials/table.html", table_data=table_data)
-    return "Invalid date", 400
+    if start_date and end_date:
+        start_date = datetime.fromisoformat(start_date)
+        end_date = datetime.fromisoformat(end_date)
+        
+    table_data = top_by_activity(start_date, end_date, limit)
+
+    return render_template("partials/table.html", table_data=table_data)
+    
 
 
 @app.route("/get-sparkline-data", methods=["POST"])
@@ -132,10 +137,14 @@ def thumbs(deviation_id):
 def get_by_publication_date():
     return jsonify({"status": "success", "data": get_publication_data()})
 
+@app.route("/get-gallery-data")
+def gallery_data():
+    return jsonify({"status": "success", "data": get_gallery_data()})
+
 if __name__ == "__main__":
-    t = threading.Thread(target=populate_hourly)
-    t.daemon = True
-    t.start()
+    # t = threading.Thread(target=populate_hourly)
+    # t.daemon = True
+    # t.start()
 
     logger.info("Starting app")
 

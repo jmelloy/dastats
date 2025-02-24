@@ -21,17 +21,84 @@
       <div class="container">
         <a class="navbar-brand" href="/">DeviantArt Statistics</a>
       </div>
+      <div class="container-fluid">
+        <div class="navbar-nav ms-auto">
+          <div class="nav-item dropdown me-3">
+            <select class="form-select" id="gallerySelect">
+              <option value="all">All Galleries</option>
+            </select>
+            <script>
+              fetch('/get-gallery-data')
+                .then(response => response.json())
+                .then(data => {
+                  const select = document.getElementById('gallerySelect');
+                  data.data.forEach(gallery => {
+                    const option = document.createElement('option');
+                    option.value = gallery.folderid;
+                    option.textContent = gallery.name;
+                    select.appendChild(option);
+                  });
+                });
+            </script>
+          </div>
+          <div class="nav-item me-3">
+            <input type="text" class="form-control" id="startDate" placeholder="Start Date">
+          </div>
+          <div class="nav-item">
+            <input type="text" class="form-control" id="endDate" placeholder="End Date">
+          </div>
+        </div>
+      </div>
+      <script>
+        flatpickr("#startDate", {
+          enableTime: false,
+          dateFormat: "Y-m-d",
+          onChange: function(date) {
+            updateTable();
+          }
+        });
+        flatpickr("#endDate", {
+          enableTime: false, 
+          dateFormat: "Y-m-d",
+          onChange: function(date) {
+            updateTable();
+          }
+        });
+      </script>
     </nav>
+
+
     <div class="container mt-8">
       <div class="row">
-        <div class="col-md-12" style="height: 200px">
+        <div class="col-md-12">
           <h2 class="text-center">Deviations by Publication Date</h2>
-          <canvas id="publicationChart"></canvas>
+          <canvas id="publicationChart" style="width: 100%; height: 200px;"></canvas>
           <script>
             document.addEventListener("DOMContentLoaded", () => {
               fetch("/get-publication-data")
                 .then((response) => response.json())
                 .then((data) => {
+                  // Fill in any missing dates with 0 counts
+                  const firstDate = new Date(data.data[0].date);
+                  const today = new Date();
+                  const filledData = [];
+                  
+                  let currentDate = new Date(firstDate);
+                  while (currentDate <= today) {
+                    const existingData = data.data.find(
+                      d => new Date(d.date).toDateString() === currentDate.toDateString()
+                    );
+                    
+                    filledData.push({
+                      date: currentDate.toISOString().split('T')[0],
+                      count: existingData ? existingData.deviations : 0,
+                      favorites: existingData ? existingData.favorites : 0
+                    });
+                    
+                    currentDate.setDate(currentDate.getDate() + 1);
+                  }
+                  
+                  data.data = filledData;
                   new Chart("publicationChart", {
                     type: "bar",
                     data: {
@@ -45,10 +112,16 @@
                           backgroundColor: "rgba(54, 162, 235, 0.5)",
                           borderColor: "rgba(54, 162, 235, 1)",
                         },
+                        {
+                          label: "Number of Favorites",
+                          data: data.data.map((d) => d.favorites),
+                          backgroundColor: "rgba(255, 159, 64, 0.5)",
+                          borderColor: "rgba(255, 159, 64, 1)",
+                        },
                       ],
                     },
                     options: {
-                      responsive: true,
+                      responsive: false,
                       maintainAspectRatio: false,
                       scales: { y: { beginAtZero: true } },
                     },
@@ -59,147 +132,79 @@
         </div>
       </div>
 
-      <h2 class="text-center">Popular Deviations</h2>
-      <div class="row mt-4">
-        <div class="col-md-4">
-          <form
-            id="main-form"
-            hx-post="/update-table"
-            hx-target="#table-body"
-            hx-trigger="change"
-          >
-            <!-- Date/Time Picker -->
-            <label for="datetime-picker" class="form-label"
-              >Select Date/Time</label
-            >
-            <input
-              id="datetime-picker"
-              name="date"
-              placeholder="Choose a date and time"
-            />
-
-            <!-- Optional Limit Field -->
-            <label for="limit-field" class="form-label mt-3">Limit</label>
-            <input
-              id="limit-field"
-              name="limit"
-              type="number"
-              min="1"
-              value="10"
-              placeholder="Enter a limit (default: 10)"
-            />
-          </form>
+  <div class="row">
+    <div class="col-md-8">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title">Top Deviations</h5>
+          <div style="float: right; font-size: 0.8em;">
+            <label for="limitSelect">Show top:</label>
+            <select class="form-control" id="limitSelect" onchange="updateTable()">
+              <option value="10" selected>10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+          
         </div>
-      </div>
-      <div class="row mt-4">
-        <div class="col-md-8 offset-md-2">
-          <table class="table table-bordered">
-            <thead>
-              <tr>
-                <th>Image</th>
-                <th>Title</th>
-                <th>Total Favorites</th>
-                <th>Total Comments</th>
-                <th>Time Range</th>
-              </tr>
-            </thead>
-            <tbody id="table-body">
-              <tr>
-                <td colspan="2" class="text-center">No data available</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>Thumbnail</th>
+                  <th>Title</th>
+                  <th>Favorites</th>
+                </tr>
+              </thead>
+              <tbody id="deviationTable">
+                <!-- Table content will be populated dynamically -->
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
+  </div>
 
-    <script>
-      let datePicker = null;
-      document.addEventListener("DOMContentLoaded", function () {
-        datePicker = flatpickr("#datetime-picker", {
-          enableTime: true,
-          dateFormat: "Y-m-d\\TH:i:S",
-          defaultDate: new Date(new Date().getTime() - 24 * 60 * 60 * 1000), // Set to 24 hours ago
-        });
+  <script>
+    // Function to update the table
+    function updateTable() {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      const limit = document.getElementById('limitSelect').value;
 
-        // Optionally trigger an event to fire a request immediately on load
-        datePicker.setDate(
-          new Date(new Date().getTime() - 24 * 60 * 60 * 1000),
-          true
-        );
+      // Show loading spinner while fetching data
+      document.getElementById('deviationTable').innerHTML = `
+        <tr>
+          <td colspan="3" class="text-center">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+          </td>
+        </tr>
+      `;
+
+      fetch('/update-table', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `start_date=${startDate}&end_date=${endDate}&limit=${limit}`
+      })
+      .then(response => response.text())
+      .then(html => {
+        document.getElementById('deviationTable').innerHTML = html;
       });
+    }
 
-      // Function to initialize sparklines for each row
-      function initializeSparklines() {
-        const canvasElements = document.querySelectorAll(
-          "canvas[id^='sparkline-']"
-        );
+    // Initial load
+    updateTable();
 
-        canvasElements.forEach((canvas) => {
-          const eventId = canvas.id.replace("sparkline-", "");
+    // Update every 5 minutes
+    setInterval(updateTable, 300000);
+  </script>
 
-          fetch("/get-sparkline-data", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: eventId,
-              date: datePicker.selectedDates[0],
-            }),
-          })
-            .then((response) => response.json())
-            .then((data) => {
-              if (data.status === "success") {
-                const ctx = canvas.getContext("2d");
-
-                new Chart(ctx, {
-                  type: "line",
-                  data: {
-                    labels: data.data.map((point) => {
-                      const date = new Date(point.timestamp);
-                      return date.toLocaleString("en-US", {
-                        month: "2-digit",
-                        day: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: false, // Use 24-hour time
-                      });
-                    }),
-                    datasets: [
-                      {
-                        data: data.data.map((point) => point.count),
-                        borderColor: "#007bff",
-                        backgroundColor: "rgba(0, 123, 255, 0.2)",
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: 1,
-                        pointHoverRadius: 3,
-                      },
-                    ],
-                  },
-                  options: {
-                    responsive: false,
-                    maintainAspectRatio: false,
-                    scales: {
-                      x: { display: false },
-                      y: { display: false },
-                    },
-                    plugins: { legend: { display: false } },
-                  },
-                });
-              }
-            });
-        });
-      }
-
-      // Listen for htmx events to reinitialize sparklines after table update
-      document.body.addEventListener("htmx:afterSwap", function (event) {
-        if (event.detail.target.id === "table-body") {
-          initializeSparklines();
-        }
-      });
-
-      // Initialize sparklines on page load
-      initializeSparklines();
-    </script>
   </body>
 </html>

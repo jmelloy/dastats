@@ -95,6 +95,8 @@ class Select:
         if limit:
             query += f" LIMIT {limit}"
 
+        logger.debug(query)
+
         return query + ";"
 
     def __str__(self):
@@ -115,15 +117,18 @@ def get_sql_type(field_type: Any) -> str:
         datetime: "TIMESTAMP",
     }
 
+    origin = get_origin(field_type)
+    args = get_args(field_type)
+
     # Handle Optional types by extracting the inner type
-    if hasattr(field_type, "__origin__") and field_type.__origin__ is Optional:
-        field_type = field_type.__args__[0]
+    if origin is Union and type(None) in args:
+        field_type = next(t for t in args if t != type(None))
 
-    if hasattr(field_type, "__origin__") and field_type.__origin__ is Union:
-        # For Union types, use the first non-None type
-        non_none_types = [t for t in field_type.__args__ if t is not type(None)]
-        field_type = non_none_types[0] if non_none_types else str
-
+    is_list = get_origin(field_type) is list
+    # Handle list types
+    if is_list:
+        field_type = get_args(field_type)[0]
+    
     # Check for nested dataclass
     if hasattr(field_type, "__dataclass_fields__"):
         nested_columns = []
@@ -132,7 +137,7 @@ def get_sql_type(field_type: Any) -> str:
                 continue
             nested_sql_type = get_sql_type(nested_field_type)
             nested_columns.append(f"{nested_field_name} {nested_sql_type}")
-        return f"STRUCT({', '.join(nested_columns)})"
+        return f"STRUCT({', '.join(nested_columns)})" + ("[]" if is_list else "")
 
     # Return the DuckDB equivalent type or 'TEXT' if unknown
     return type_mapping.get(field_type, "TEXT")
@@ -220,6 +225,7 @@ class BaseModel:
         non_null_cols = {
             col: value.to_dict() if isinstance(value, BaseModel) else [v.to_dict() for v in value] if isinstance(value, list) else value 
             for col, value in self.to_dict().items()
+            if value is not None
         }
 
         cols = ", ".join(non_null_cols.keys())
@@ -233,19 +239,13 @@ class BaseModel:
 
     def update(self, conn, cols=None) -> str:
         if not cols:
-            columns = {
-            col: getattr(self, col)
-            for col in self.columns
-            if col not in self.pk()
-        }
-        else:
-            columns = {
-                col: getattr(self, col)
-                for col in cols
-                if col not in self.pk()
-            }
+            cols = self.columns
 
-        logger.info(columns)
+        columns = {
+            col: value.to_dict() if isinstance(value, BaseModel) else [v.to_dict() for v in value] if isinstance(value, list) else value 
+            for col, value in self.to_dict().items()
+            if col not in self.pk() and col in cols
+        }
 
         pk = {
             col: getattr(self, col)
@@ -258,17 +258,15 @@ class BaseModel:
 
         sql = f"UPDATE {self.table_name} SET {set_clause} WHERE {where_clause};"
 
-        logger.info(sql)
+        logger.debug(sql)
+        logger.debug(list(columns.values()) + list(pk.values()))
 
         return conn.execute(sql, list(columns.values()) + list(pk.values()))
 
     def upsert(self, conn, cols=None) -> str:
-        if not cols:
-            cols = self.columns
-
         upd = self.update(conn, cols)
         if upd.rowcount == 0:
-            return self.insert(conn, ignore_conflicts=True, duplicate=self.pk())
+            return self.insert(conn, conflict_mode="replace")
         
         return upd
 
@@ -476,16 +474,17 @@ class Camera:
 
 @dataclass
 class Collection(BaseModel):
-    folderid: uuid.UUID
+    table_name = "collections"
+
+    folderid: uuid.UUID = field(metadata={"primary_key": True})
     name: str
 
 @dataclass
 class Gallery(BaseModel):
-    folderid: uuid.UUID
+    table_name = "galleries"
+
+    folderid: uuid.UUID = field(metadata={"primary_key": True})
     name: str
-
-
-
 
 @dataclass
 class DeviationMetadata(BaseModel):

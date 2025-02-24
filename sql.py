@@ -6,12 +6,23 @@ from datetime import datetime, timedelta
 def top_by_activity(start_time=None, end_time=None, limit=10):
 
     # Connect to the database
-    query = Select(Deviation, columns=["deviationid", "title", "url", "published_time", "stats.favourites as favorites"])
+    query = Select(
+        Deviation,
+        columns=[
+            "deviationid",
+            "title",
+            "url",
+            "published_time",
+            "stats.favourites as favorites",
+        ],
+    )
 
     if start_time or end_time:
         query = (
-            query.join(DeviationActivity, on="deviationid", how="left")            
-            .select("deviationid", "title", "url", "published_time", "count(*) as favorites")
+            query.join(DeviationActivity, on="deviationid", how="left")
+            .select(
+                "deviationid", "title", "url", "published_time", "count(*) as favorites"
+            )
             .group_by("deviations.*")
             .order_by("count(*) desc, published_time")
         )
@@ -21,6 +32,31 @@ def top_by_activity(start_time=None, end_time=None, limit=10):
             query = query.where(f"timestamp <= '{end_time}'")
     else:
         query = query.order_by("stats.favourites desc")
+
+    with duckdb.connect(
+        "deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}
+    ) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query.sql(limit=limit))
+            columns = [col[0].lower() for col in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def get_user_data(start_time, end_time, limit=10):
+
+    # Connect to the database
+    query = (
+        Select(DeviationActivity)
+        .join(User, on="userid")
+        .select("userid", "username", "count(*) as favorites")
+        .group_by("userid", "username")
+        .order_by("count(*) desc")
+    )
+
+    if start_time:
+        query = query.where(f"timestamp >= '{start_time}'")
+    if end_time:
+        query = query.where(f"timestamp <= '{end_time}'")
 
     with duckdb.connect(
         "deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}
@@ -84,16 +120,23 @@ def get_deviation_activity(deviationid, start_date):
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-def get_publication_data():
-    query = """
+def get_publication_data(start_date, end_date):
+    if not start_date:
+        start_date = datetime(1970, 1, 1)
+    if not end_date:
+        end_date = datetime.now()
+
+    query = f"""
     with deviationas as (
         SELECT to_timestamp(published_time::bigint)::date as date, COUNT(*) as count 
         FROM deviations
+        WHERE published_time::bigint >= '{start_date.timestamp()}' AND published_time::bigint <= '{end_date.timestamp()}'
         GROUP BY 1
         ORDER BY 1
     ), activity as (
         SELECT timestamp::date as date, COUNT(*) as count
         FROM deviation_activity
+        WHERE timestamp >= '{start_date}' AND timestamp <= '{end_date}'
         GROUP BY 1
         ORDER BY 1
     )
@@ -106,6 +149,7 @@ def get_publication_data():
         "deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}
     ) as conn:
         with conn.cursor() as cursor:
+            logger.info(query)
             cursor.execute(query)
             columns = [col[0].lower() for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]

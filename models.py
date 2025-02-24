@@ -1,11 +1,22 @@
 from dataclasses import dataclass, field, fields
-from typing import Any, Dict, List, Optional, Union, get_type_hints, get_args, get_origin, Literal
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Union,
+    get_type_hints,
+    get_args,
+    get_origin,
+    Literal,
+)
 import uuid
 import logging
 from duckdb import DuckDBPyConnection
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
 
 class Select:
     def __init__(self, model: Union["BaseModel", str], columns="*"):
@@ -128,7 +139,7 @@ def get_sql_type(field_type: Any) -> str:
     # Handle list types
     if is_list:
         field_type = get_args(field_type)[0]
-    
+
     # Check for nested dataclass
     if hasattr(field_type, "__dataclass_fields__"):
         nested_columns = []
@@ -183,22 +194,25 @@ class BaseModel:
             if field_name == "table_name":
                 continue
             value = data.get(field_name)
-            
+
             origin = get_origin(field_type)
             args = get_args(field_type)
 
             if origin is Union and type(None) in args:
                 # Get the actual type (first type arg that's not None)
                 field_type = next(t for t in get_args(field_type) if t != type(None))
-                
+
             if hasattr(field_type, "__dataclass_fields__") and isinstance(value, dict):
                 init_args[field_name] = field_type.from_json(value)  # Nested dataclass
 
-            elif get_origin(field_type) is list  and isinstance(value, list):
+            elif get_origin(field_type) is list and isinstance(value, list):
                 item_type = get_args(field_type)[0]
                 if hasattr(item_type, "__dataclass_fields__"):
-                    init_args[field_name] = [item_type.from_json(item) if isinstance(item, dict) else item for item in value]
-                else:   
+                    init_args[field_name] = [
+                        item_type.from_json(item) if isinstance(item, dict) else item
+                        for item in value
+                    ]
+                else:
                     init_args[field_name] = value
             else:
                 init_args[field_name] = value
@@ -209,10 +223,8 @@ class BaseModel:
     def select(
         cls, conn, where: str = "", offset=None, limit=None
     ) -> List["BaseModel"]:
-        
+
         return conn.execute(Select(cls, "*").where(where).sql(offset, limit)).fetchall()
-
-
 
     def insert(
         self,
@@ -223,7 +235,11 @@ class BaseModel:
 
         # Convert any BaseModel values to their JSON representation
         non_null_cols = {
-            col: value.to_dict() if isinstance(value, BaseModel) else [v.to_dict() for v in value] if isinstance(value, list) else value 
+            col: (
+                value.to_dict()
+                if isinstance(value, BaseModel)
+                else [v.to_dict() for v in value] if isinstance(value, list) else value
+            )
             for col, value in self.to_dict().items()
             if value is not None
         }
@@ -231,9 +247,8 @@ class BaseModel:
         cols = ", ".join(non_null_cols.keys())
         values = ", ".join(f"?" for f in non_null_cols.keys())
 
-        
         sql = f"INSERT {f'OR {conflict_mode}' if conflict_mode else ''} INTO {self.table_name} ({cols}) VALUES ({values})"
-        
+
         logger.debug(sql)
         return conn.execute(f"{sql};", non_null_cols.values())
 
@@ -242,15 +257,16 @@ class BaseModel:
             cols = self.columns
 
         columns = {
-            col: value.to_dict() if isinstance(value, BaseModel) else [v.to_dict() for v in value] if isinstance(value, list) else value 
+            col: (
+                value.to_dict()
+                if isinstance(value, BaseModel)
+                else [v.to_dict() for v in value] if isinstance(value, list) else value
+            )
             for col, value in self.to_dict().items()
             if col not in self.pk() and col in cols
         }
 
-        pk = {
-            col: getattr(self, col)
-            for col in self.pk()
-        }
+        pk = {col: getattr(self, col) for col in self.pk()}
 
         set_clause = ", ".join(f"{col} = ?" for col in columns)
 
@@ -267,9 +283,8 @@ class BaseModel:
         upd = self.update(conn, cols)
         if upd.rowcount == 0:
             return self.insert(conn, conflict_mode="replace")
-        
-        return upd
 
+        return upd
 
     def delete(self, conn) -> str:
         return conn.execute(
@@ -371,10 +386,11 @@ class DailyDeviation(BaseModel):
 class MotionBook(BaseModel):
     embed_url: str
 
+
 @dataclass
 class User(BaseModel):
     table_name = "users"
-    
+
     userid: uuid.UUID = field(metadata={"primary_key": True})
     username: str
     usericon: str
@@ -444,8 +460,6 @@ class DeviationActivity(BaseModel):
     timestamp: datetime
 
 
-
-
 @dataclass
 class Tag(BaseModel):
     tag_name: str
@@ -460,6 +474,7 @@ class Submission(BaseModel):
     file_size: Optional[str]
     resolution: Optional[str]
 
+
 @dataclass
 class Stats(BaseModel):
     views: int
@@ -468,9 +483,11 @@ class Stats(BaseModel):
     comments: int
     downloads: int
 
+
 @dataclass
 class Camera:
     pass
+
 
 @dataclass
 class Collection(BaseModel):
@@ -479,12 +496,14 @@ class Collection(BaseModel):
     folderid: uuid.UUID = field(metadata={"primary_key": True})
     name: str
 
+
 @dataclass
 class Gallery(BaseModel):
     table_name = "galleries"
 
     folderid: uuid.UUID = field(metadata={"primary_key": True})
     name: str
+
 
 @dataclass
 class DeviationMetadata(BaseModel):
@@ -510,5 +529,3 @@ class DeviationMetadata(BaseModel):
     collections: Optional[List[Collection]]
     galleries: Optional[List[Gallery]]
     can_post_comment: bool
-
-

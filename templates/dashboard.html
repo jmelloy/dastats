@@ -54,14 +54,14 @@
           enableTime: false,
           dateFormat: "Y-m-d",
           onChange: function(date) {
-            updateTable();
+            updateAll();
           }
-        });
+        }); 
         flatpickr("#endDate", {
           enableTime: false, 
           dateFormat: "Y-m-d",
           onChange: function(date) {
-            updateTable();
+            updateAll();
           }
         });
       </script>
@@ -72,19 +72,28 @@
       <div class="row">
         <div class="col-md-12">
           <h2 class="text-center">Deviations by Publication Date</h2>
-          <canvas id="publicationChart" style="width: 100%; height: 200px;"></canvas>
+          <canvas id="publicationChart" style="min-height: 200px; max-height: 250px;"></canvas>
           <script>
-            document.addEventListener("DOMContentLoaded", () => {
-              fetch("/get-publication-data")
+            function updatePublicationChart() {
+              const startDate = document.getElementById('startDate').value;
+              const endDate = document.getElementById('endDate').value;
+
+              const queryParams = new URLSearchParams({
+                start_date: startDate,
+                end_date: endDate
+              }).toString();
+
+              fetch(`/get-publication-data?${queryParams}`)
                 .then((response) => response.json())
                 .then((data) => {
+                  console.log(data)
                   // Fill in any missing dates with 0 counts
-                  const firstDate = new Date(data.data[0].date);
-                  const today = new Date();
+                  const firstDate = startDate ? new Date(startDate) : new Date(data.data[0].date);
+                  const lastDate = endDate ? new Date(endDate) : new Date();
                   const filledData = [];
                   
                   let currentDate = new Date(firstDate);
-                  while (currentDate <= today) {
+                  while (currentDate <= lastDate) {
                     const existingData = data.data.find(
                       d => new Date(d.date).toDateString() === currentDate.toDateString()
                     );
@@ -99,8 +108,57 @@
                   }
                   
                   data.data = filledData;
-                  new Chart("publicationChart", {
+                  // Destroy existing chart if it exists
+                  const existingChart = Chart.getChart("publicationChart");
+                  if (existingChart) {
+                    existingChart.destroy();
+                  }
+
+                  // Create new chart with zoom plugin
+                  const chart = new Chart("publicationChart", {
                     type: "bar",
+                    plugins: [{
+                      id: 'dragSelect',
+                      afterInit: function(chart) {
+                        let dragStart = null;
+                        let dragging = false;
+
+                        chart.canvas.addEventListener('mousedown', (e) => {
+                          const rect = chart.canvas.getBoundingClientRect();
+                          dragStart = {
+                            x: e.clientX - rect.left,
+                            y: e.clientY - rect.top
+                          };
+                          dragging = true;
+                        });
+
+                        chart.canvas.addEventListener('mousemove', (e) => {
+                          if (!dragging) return;
+                          
+                          const rect = chart.canvas.getBoundingClientRect();
+                          const x = e.clientX - rect.left;
+                          
+                          // Get dates from x coordinates
+                          const xScale = chart.scales.x;
+                          const startIndex = xScale.getValueForPixel(Math.min(dragStart.x, x));
+                          const endIndex = xScale.getValueForPixel(Math.max(dragStart.x, x));
+                          
+                          const startDate = data.data[Math.max(0, Math.floor(startIndex))].date;
+                          const endDate = data.data[Math.min(data.data.length - 1, Math.ceil(endIndex))].date;
+                          
+                          // Update date inputs
+                          document.getElementById('startDate').value = startDate;
+                          document.getElementById('endDate').value = endDate;
+                        });
+
+                        document.addEventListener('mouseup', () => {
+                          if (dragging) {
+                            dragging = false;
+                            updateAll();
+                          }
+                        });
+                      }
+                    }],
                     data: {
                       labels: data.data.map((d) =>
                         new Date(d.date).toLocaleDateString()
@@ -113,7 +171,7 @@
                           borderColor: "rgba(54, 162, 235, 1)",
                         },
                         {
-                          label: "Number of Favorites",
+                          label: "Number of Favorites", 
                           data: data.data.map((d) => d.favorites),
                           backgroundColor: "rgba(255, 159, 64, 0.5)",
                           borderColor: "rgba(255, 159, 64, 1)",
@@ -121,13 +179,13 @@
                       ],
                     },
                     options: {
-                      responsive: false,
+                      responsive: true,
                       maintainAspectRatio: false,
                       scales: { y: { beginAtZero: true } },
                     },
                   });
                 });
-            });
+            };
           </script>
         </div>
       </div>
@@ -136,17 +194,18 @@
     <div class="col-md-8">
       <div class="card">
         <div class="card-header">
-          <h5 class="card-title">Top Deviations</h5>
-          <div style="float: right; font-size: 0.8em;">
-            <label for="limitSelect">Show top:</label>
-            <select class="form-control" id="limitSelect" onchange="updateTable()">
-              <option value="10" selected>10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-            </select>
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0" id="deviationTitle">Top Deviations</h5>
+            <div style="font-size: 0.8em;">
+              <label for="limitSelect">Show top:</label>
+              <select class="form-control" id="limitSelect" onchange="updateTable()">
+                <option value="10" selected>10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
           </div>
-          
         </div>
         <div class="card-body">
           <div class="table-responsive">
@@ -159,6 +218,40 @@
                 </tr>
               </thead>
               <tbody id="deviationTable">
+                <!-- Table content will be populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-header">
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">Top Users</h5>
+            <div style="font-size: 0.8em;">
+              <label for="limitSelect">Show top:</label>
+              <select class="form-control" id="topUserlimitSelect" onchange="topUsers()">
+                <option value="10" selected>10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Favorites</th>
+                </tr>
+              </thead>
+              <tbody id="userTable">
                 <!-- Table content will be populated dynamically -->
               </tbody>
             </table>
@@ -186,24 +279,103 @@
         </tr>
       `;
 
-      fetch('/update-table', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `start_date=${startDate}&end_date=${endDate}&limit=${limit}`
-      })
-      .then(response => response.text())
+      const queryParams = new URLSearchParams({
+        start_date: startDate,
+        end_date: endDate,
+        limit: limit
+      }).toString();
+
+      fetch(`/update-table?${queryParams}`)
+        .then(response => response.text())
       .then(html => {
         document.getElementById('deviationTable').innerHTML = html;
       });
     }
 
-    // Initial load
-    updateTable();
+  </script>
 
-    // Update every 5 minutes
-    setInterval(updateTable, 300000);
+  <script>
+    // Function to fetch and display top users data
+    function topUsers() {
+      // Show loading spinner while fetching data
+      document.getElementById('userTable').innerHTML = `
+        <tr>
+          <td colspan="2" class="text-center">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+          </td>
+        </tr>
+      `;
+
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      const limit = document.getElementById('topUserlimitSelect').value;
+      
+      const queryParams = new URLSearchParams({
+        start_date: startDate,
+        end_date: endDate, 
+        limit: limit
+      }).toString();
+
+      fetch(`/get-users?${queryParams}`)
+        .then(response => response.json())
+        .then(data => {
+          
+          if (data.status === 'success') {
+            const userTable = document.getElementById('userTable');
+            userTable.innerHTML = '';
+
+            data.data.forEach(user => {
+              const row = document.createElement('tr');
+              row.innerHTML = `
+                <td><a href="https://www.deviantart.com/${user.username}">${user.username}</a></td>
+                <td>${user.favorites}</td>
+              `;
+              userTable.appendChild(row);
+            });
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching top users:', error);
+          document.getElementById('userTable').innerHTML = `
+            <tr>
+              <td colspan="2" class="text-center text-danger">
+                Error loading user data
+              </td>
+            </tr>
+          `;
+        });
+    }
+
+  </script>
+
+  <script>
+    function updateAll() {
+      updatePublicationChart();
+      updateTable();
+      topUsers();
+
+      startDate = document.getElementById('startDate').value;
+      endDate = document.getElementById('endDate').value;
+      title = `Top Deviations`;
+      if (startDate) {
+        title += ` - ${startDate}`;
+      }
+      if (endDate) {
+        title += ` - ${endDate}`;
+      }
+
+      if (gallery) {
+        title += ` - ${gallery}`;
+      }
+
+      document.getElementById('deviationTitle').textContent = title;
+    }
+
+    updateAll();
+    
+
   </script>
 
   </body>

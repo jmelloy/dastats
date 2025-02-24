@@ -7,7 +7,15 @@ import logging
 from datetime import datetime
 import pandas as pd
 from typing import Iterator
-from models import Deviation, DeviationActivity, Select, DeviationMetadata, User, Collection, Gallery
+from models import (
+    Deviation,
+    DeviationActivity,
+    Select,
+    DeviationMetadata,
+    User,
+    Collection,
+    Gallery,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +40,6 @@ def raise_for_status(response):
     return response
 
 
-
 class DeviantArt:
     def __init__(self):
         self.access_token = ""
@@ -53,12 +60,13 @@ class DeviantArt:
                 self.access_token = data["access_token"]
                 self.refresh_token = data["refresh_token"]
                 self.expires = data.get("expires_at", 0)
-        
+
             self.check_token()
 
-
     def authorization_url(self):
-        logger.info(f"Authorization URL: {AUTHORIZATION_BASE_URL}?client_id={self.client_id}&redirect_uri={REDIRECT_URI}&response_type=code&scope=browse")
+        logger.info(
+            f"Authorization URL: {AUTHORIZATION_BASE_URL}?client_id={self.client_id}&redirect_uri={REDIRECT_URI}&response_type=code&scope=browse"
+        )
         return f"{AUTHORIZATION_BASE_URL}?client_id={self.client_id}&redirect_uri={REDIRECT_URI}&response_type=code&scope=browse"
 
     def check_token(self):
@@ -199,8 +207,8 @@ class DeviantArt:
                 results = metadata.get("results", [])
                 for item in results:
                     yield item
-                
-                sleep_time = max(1, sleep_time / 2) 
+
+                sleep_time = max(1, sleep_time / 2)
             except Exception as e:
                 logger.error(f"Error fetching whofaved for {deviation_id}: {e}")
                 if e.response.status_code == 429:
@@ -214,7 +222,7 @@ class DeviantArt:
         batch_size = 10
 
         for i in range(0, len(deviation_ids), batch_size):
-            batch = deviation_ids[i: i + batch_size]
+            batch = deviation_ids[i : i + batch_size]
             if batch:
                 url = f"{API_BASE_URL}/deviation/metadata"
                 params = {
@@ -225,13 +233,15 @@ class DeviantArt:
                     "ext_collection": "true",
                     "ext_gallery": "true",
                 }
-                logger.info(f"Fetching metadata for {len(batch)} deviations - {batch[0]} - {batch[-1]}")
+                logger.info(
+                    f"Fetching metadata for {len(batch)} deviations - {batch[0]} - {batch[-1]}"
+                )
                 response = raise_for_status(requests.get(url, params=params))
                 metadata = response.json().get("metadata", [])
 
                 for item in metadata:
                     yield DeviationMetadata.from_json(item)
-                
+
                 time.sleep(1)
 
     def whoami(self):
@@ -278,7 +288,9 @@ def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
             ],
         )
         .join(DeviationMetadata, on="deviationid", how="left")
-        .where(f"{Deviation.table_name}.stats.favourites is distinct from {DeviationMetadata.table_name}.stats.favourites")
+        .where(
+            f"{Deviation.table_name}.stats.favourites is distinct from {DeviationMetadata.table_name}.stats.favourites"
+        )
     )
     logger.info(select.sql())
 
@@ -301,6 +313,7 @@ def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
         for g in item.galleries:
             r = g.insert(db, conflict_mode="replace")
 
+
 def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
     select = (
         Select(
@@ -321,9 +334,14 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
     rows = db.execute(select.sql()).fetchall()
 
     for deviation_id, fav, count in rows:
-        logger.info(f"Fetching /whofaved for deviation: {deviation_id} ({fav} / {count})")
+        logger.info(
+            f"Fetching /whofaved for deviation: {deviation_id} ({fav} / {count})"
+        )
         if count > fav:
-            db.execute(f"DELETE FROM {DeviationActivity.table_name} WHERE deviationid = ?", (deviation_id,))
+            db.execute(
+                f"DELETE FROM {DeviationActivity.table_name} WHERE deviationid = ?",
+                (deviation_id,),
+            )
             logger.info(f"Deleted {count - fav} rows for deviation: {deviation_id}")
             count = 0
 
@@ -332,7 +350,7 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
             if user:
                 user = User.from_json(item.get("user"))
                 user.insert(db, conflict_mode="replace")
-                
+
                 a = DeviationActivity(
                     deviationid=deviation_id,
                     userid=user.userid,
@@ -346,7 +364,14 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
 
 def populate(da: DeviantArt):
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
-        for table in [User, Deviation, DeviationMetadata, DeviationActivity, Collection, Gallery]:
+        for table in [
+            User,
+            Deviation,
+            DeviationMetadata,
+            DeviationActivity,
+            Collection,
+            Gallery,
+        ]:
             logging.info(table.create_table_sql())
             db.execute(table.create_table_sql())
 
@@ -358,6 +383,7 @@ def populate(da: DeviantArt):
 if __name__ == "__main__":
 
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()

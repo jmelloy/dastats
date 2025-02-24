@@ -1,9 +1,22 @@
-from flask import Flask, request, redirect, jsonify, render_template, send_from_directory
+from flask import (
+    Flask,
+    request,
+    redirect,
+    jsonify,
+    render_template,
+    send_from_directory,
+)
 from da import DeviantArt, populate
 
 import os
 from datetime import datetime
-from sql import top_by_activity, get_deviation_activity, get_publication_data, get_gallery_data
+from sql import (
+    top_by_activity,
+    get_deviation_activity,
+    get_publication_data,
+    get_gallery_data,
+    get_user_data,
+)
 
 import multiprocessing
 import threading
@@ -19,7 +32,9 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 p = None
 
@@ -53,7 +68,7 @@ def index():
 
     if not os.path.exists(".credentials.json"):
         return render_template("credentials.html")
-    
+
     da = DeviantArt()
 
     logger.info("Credentials set")
@@ -63,6 +78,7 @@ def index():
         return redirect(da.authorization_url())
 
     return redirect("/stats/")
+
 
 # OAuth configuration
 @app.route("/login", methods=["POST"])
@@ -100,22 +116,23 @@ def stats():
     )
 
 
-@app.route("/update-table", methods=["POST"])
+@app.route("/update-table")
 def update_table():
-    start_date = request.form.get("start_date")
-    end_date = request.form.get("end_date")
-    limit = request.form.get("limit", 10)
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    limit = request.args.get("limit", 10)
 
     logger.info(f"Updating table for {start_date} to {end_date} with limit {limit}")
 
-    if start_date and end_date:
+    if start_date:
         start_date = datetime.fromisoformat(start_date)
+
+    if end_date:
         end_date = datetime.fromisoformat(end_date)
-        
+
     table_data = top_by_activity(start_date, end_date, limit)
 
     return render_template("partials/table.html", table_data=table_data)
-    
 
 
 @app.route("/get-sparkline-data", methods=["POST"])
@@ -131,15 +148,51 @@ def get_sparkline_data():
 
 @app.route("/thumbs/<deviation_id>")
 def thumbs(deviation_id):
-    return send_from_directory(os.path.join(os.getcwd(), "thumbs"), f"{deviation_id}.jpg")
+    return send_from_directory(
+        os.path.join(os.getcwd(), "thumbs"), f"{deviation_id}.jpg"
+    )
+
 
 @app.route("/get-publication-data")
 def get_by_publication_date():
-    return jsonify({"status": "success", "data": get_publication_data()})
+    start_date = request.args.get("start_date")
+    if start_date:
+        start_date = datetime.fromisoformat(start_date)
+
+    end_date = request.args.get("end_date")
+    if end_date:
+        end_date = datetime.fromisoformat(end_date)
+
+    logger.info(f"Getting publication data for {start_date} to {end_date}")
+    return jsonify(
+        {"status": "success", "data": get_publication_data(start_date, end_date)}
+    )
+
 
 @app.route("/get-gallery-data")
 def gallery_data():
     return jsonify({"status": "success", "data": get_gallery_data()})
+
+
+@app.route("/get-users")
+def get_users():
+
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    limit = request.args.get("limit", 10)
+
+    if start_date:
+        start_date = datetime.fromisoformat(start_date)
+
+    if end_date:
+        end_date = datetime.fromisoformat(end_date)
+
+    logger.info(f"Updating users for {start_date} to {end_date} with limit {limit}")
+
+    return jsonify(
+        {"status": "success", "data": get_user_data(start_date, end_date, limit)}
+    )
+
 
 if __name__ == "__main__":
     # t = threading.Thread(target=populate_hourly)

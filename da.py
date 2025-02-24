@@ -41,18 +41,21 @@ class DeviantArt:
         self.client_id = None
         self.client_secret = None
 
+        if os.path.exists(".credentials.json"):
+            with open(".credentials.json", "r") as F:
+                data = json.loads(F.read())
+                self.client_id = data["client_id"]
+                self.client_secret = data["client_secret"]
+
         if os.path.exists(".token.json"):
             with open(".token.json", "r") as F:
                 data = json.loads(F.read())
                 self.access_token = data["access_token"]
                 self.refresh_token = data["refresh_token"]
                 self.expires = data.get("expires_at", 0)
+        
+            self.check_token()
 
-        if os.path.exists(".credentials.json"):
-            with open(".credentials.json", "r") as F:
-                data = json.loads(F.read())
-                self.client_id = data["client_id"]
-                self.client_secret = data["client_secret"]
 
     def authorization_url(self):
         logger.info(f"Authorization URL: {AUTHORIZATION_BASE_URL}?client_id={self.client_id}&redirect_uri={REDIRECT_URI}&response_type=code&scope=browse")
@@ -250,17 +253,16 @@ def populate_gallery(da: DeviantArt, db: duckdb.DuckDBPyConnection, gallery="all
         logger.debug(item)
         author = item.author
         if author:
-            author = User.from_json(author)
-            author.insert(db, duplicate="userid")
+            r = author.insert(db, conflict_mode="replace")
+            logger.debug(r.fetchall())
             item.user_id = author.userid
 
-        item.insert(db, duplicate="deviationid")
+        item.insert(db, conflict_mode="replace")
 
         if item.thumbs:
             thumb = item.thumbs[0]
 
             os.makedirs("thumbs", exist_ok=True)
-            thumb = Thumbnail.from_json(thumb)
             res = requests.get(thumb.src)
             if res.status_code == 200:
                 with open(f"thumbs/{item.deviationid}.jpg", "wb") as F:
@@ -293,11 +295,10 @@ def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
     for item in da.get_metadata(deviation_ids):
         user = item.author
         if user:
-            user = User.from_json(user)
-            user.insert(db, duplicate="userid")
+            user.insert(db, conflict_mode="replace")
             item.user_id = user.userid
 
-        item.insert(db, duplicate="deviationid")
+        item.insert(db, conflict_mode="replace")
 
 def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
     logger.info(DeviationActivity.create_table_sql())
@@ -322,12 +323,12 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
     rows = db.execute(select.sql()).fetchall()
 
     for deviation_id, fav, count in rows:
-        logger.info(f"Fetching /whofaved for deviation: {deviation_id} {count} {fav}")
-        for item in da.get_whofaved(deviation_id, offset=count - 1):
+        logger.info(f"Fetching /whofaved for deviation: {deviation_id} ({fav} / {count})")
+        for item in da.get_whofaved(deviation_id, offset=max(0, count - 1)):
             user = User.from_json(item.get("user"))
             if user:
                 user = User.from_json(item.get("user"))
-                user.insert(db, duplicate="userid")
+                user.insert(db, conflict_mode="replace")
                 
                 a = DeviationActivity(
                     deviationid=deviation_id,
@@ -336,7 +337,7 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
                     action="fave",
                     timestamp=datetime.fromtimestamp(item.get("time")),
                 )
-                a.insert(db, ignore_conflicts=True)
+                a.insert(db, conflict_mode="ignore")
         time.sleep(1)
 
 
@@ -352,8 +353,13 @@ def populate(da: DeviantArt):
 
 if __name__ == "__main__":
 
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
+
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 

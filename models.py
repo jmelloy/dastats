@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, fields
-from typing import Any, Dict, List, Optional, Union, get_type_hints
+from typing import Any, Dict, List, Optional, Union, get_type_hints, get_args, get_origin, Literal
 import uuid
 import logging
 from duckdb import DuckDBPyConnection
@@ -178,15 +178,26 @@ class BaseModel:
             if field_name == "table_name":
                 continue
             value = data.get(field_name)
+            
+            origin = get_origin(field_type)
+            args = get_args(field_type)
+
+            if origin is Union and type(None) in args:
+                # Get the actual type (first type arg that's not None)
+                field_type = next(t for t in get_args(field_type) if t != type(None))
+                
             if hasattr(field_type, "__dataclass_fields__") and isinstance(value, dict):
-                init_args[field_name] = value # field_type.from_json(value)  # Nested dataclass
-            elif field_type == Optional[List[Any]] and isinstance(value, list):
-                init_args[field_name] = [
-                    field_type.__args__[0](**item) if isinstance(item, dict) else item
-                    for item in value
-                ]  # List of nested dataclasses
+                init_args[field_name] = field_type.from_json(value)  # Nested dataclass
+
+            elif get_origin(field_type) is list  and isinstance(value, list):
+                item_type = get_args(field_type)[0]
+                if hasattr(item_type, "__dataclass_fields__"):
+                    init_args[field_name] = [item_type.from_json(item) if isinstance(item, dict) else item for item in value]
+                else:   
+                    init_args[field_name] = value
             else:
                 init_args[field_name] = value
+
         return cls(**init_args)
 
     @classmethod
@@ -196,29 +207,27 @@ class BaseModel:
         
         return conn.execute(Select(cls, "*").where(where).sql(offset, limit)).fetchall()
 
+
+
     def insert(
         self,
         conn: DuckDBPyConnection,
         *,
-        ignore_conflicts: bool = False,
-        duplicate: str = None,
+        conflict_mode: Literal["ignore", "replace"] = None,
     ) -> str:
 
+        # Convert any BaseModel values to their JSON representation
         non_null_cols = {
-            col: getattr(self, col)
-            for col in self.columns
-            if getattr(self, col) is not None
+            col: value.to_dict() if isinstance(value, BaseModel) else [v.to_dict() for v in value] if isinstance(value, list) else value 
+            for col, value in self.to_dict().items()
         }
 
         cols = ", ".join(non_null_cols.keys())
         values = ", ".join(f"?" for f in non_null_cols.keys())
 
-        sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({values})"
-        if ignore_conflicts:
-            sql += " ON CONFLICT DO NOTHING"
-        elif duplicate:
-            sql += f" ON CONFLICT ({duplicate}) DO UPDATE SET {', '.join(f'{f.name}=EXCLUDED.{f.name}' for f in fields(self) if f.name != "table_name" and f.name not in self.pk())}"
-
+        
+        sql = f"INSERT {f'OR {conflict_mode}' if conflict_mode else ''} INTO {self.table_name} ({cols}) VALUES ({values})"
+        
         logger.debug(sql)
         return conn.execute(f"{sql};", non_null_cols.values())
 
@@ -314,13 +323,13 @@ class BaseModel:
 
 
 @dataclass
-class Stats:
+class Stats(BaseModel):
     comments: int
     favourites: int
 
 
 @dataclass
-class Preview:
+class Preview(BaseModel):
     src: str
     height: int
     width: int
@@ -328,7 +337,7 @@ class Preview:
 
 
 @dataclass
-class Content:
+class Content(BaseModel):
     src: str
     height: int
     width: int
@@ -345,7 +354,7 @@ class Thumbnail(BaseModel):
 
 
 @dataclass
-class Video:
+class Video(BaseModel):
     src: str
     quality: str
     filesize: int
@@ -353,7 +362,7 @@ class Video:
 
 
 @dataclass
-class DailyDeviation:
+class DailyDeviation(BaseModel):
     body: str
     time: str
     giver: Dict[str, Any]
@@ -361,7 +370,7 @@ class DailyDeviation:
 
 
 @dataclass
-class MotionBook:
+class MotionBook(BaseModel):
     embed_url: str
 
 @dataclass
@@ -440,21 +449,21 @@ class DeviationActivity(BaseModel):
 
 
 @dataclass
-class Tag:
+class Tag(BaseModel):
     tag_name: str
     sponsored: bool
     sponsor: str
 
 
 @dataclass
-class Submission:
+class Submission(BaseModel):
     creation_time: str
     category: str
     file_size: Optional[str]
     resolution: Optional[str]
 
 @dataclass
-class Stats:
+class Stats(BaseModel):
     views: int
     views_today: Optional[int]
     favourites: int
@@ -466,12 +475,12 @@ class Camera:
     pass
 
 @dataclass
-class Collection:
+class Collection(BaseModel):
     folderid: uuid.UUID
     name: str
 
 @dataclass
-class Gallery:
+class Gallery(BaseModel):
     folderid: uuid.UUID
     name: str
 

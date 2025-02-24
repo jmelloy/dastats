@@ -46,9 +46,7 @@ def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
             "deviations.stats.favourites desc, deviations.published_time"
         )
 
-    with duckdb.connect(
-        "deviantart_data.db", config={"access_mode": "READ_ONLY"}
-    ) as conn:
+    with duckdb.connect("deviantart_data.db", read) as conn:
         with conn.cursor() as cursor:
             cursor.execute(query.sql(limit=limit))
             columns = [col[0].lower() for col in cursor.description]
@@ -76,9 +74,7 @@ def get_user_data(start_time, end_time, limit=10, gallery="all"):
     if end_time:
         query = query.where(f"timestamp <= '{end_time}'")
 
-    with duckdb.connect(
-        "deviantart_data.db", config={"access_mode": "READ_ONLY"}
-    ) as conn:
+    with duckdb.connect("deviantart_data.db", read) as conn:
         with conn.cursor() as cursor:
             cursor.execute(query.sql(limit=limit))
             columns = [col[0].lower() for col in cursor.description]
@@ -129,9 +125,7 @@ def get_deviation_activity(deviationid, start_date):
         ORDER BY ts.time_bucket
     """
 
-    with duckdb.connect(
-        "deviantart_data.db", True
-    ) as conn:
+    with duckdb.connect("deviantart_data.db", True) as conn:
         with conn.cursor() as cursor:
             cursor.execute(query)
             columns = [col[0].lower() for col in cursor.description]
@@ -174,9 +168,7 @@ def get_publication_data(start_date, end_date, gallery="all"):
     FULL OUTER JOIN deviationas ON activity.date = deviationas.date
     """
 
-    with duckdb.connect(
-        "deviantart_data.db", config={"access_mode": "READ_ONLY"}
-    ) as conn:
+    with duckdb.connect("deviantart_data.db", read) as conn:
         with conn.cursor() as cursor:
             logger.debug(query)
             cursor.execute(query)
@@ -192,9 +184,7 @@ def get_gallery_data():
         GROUP BY folderid, name
         ORDER BY count(*) DESC
     """
-    with duckdb.connect(
-        "deviantart_data.db", config={"access_mode": "READ_ONLY"}
-    ) as conn:
+    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
         with conn.cursor() as cursor:
             cursor.execute(query)
             columns = [col[0].lower() for col in cursor.description]

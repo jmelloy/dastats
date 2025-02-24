@@ -3,35 +3,39 @@ from models import *
 from datetime import datetime, timedelta
 
 
-def top_by_activity(start_time=None, end_time=None, limit=10):
+def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
 
     # Connect to the database
     query = Select(
         Deviation,
         columns=[
-            "deviationid",
-            "title",
-            "url",
-            "published_time",
-            "stats.favourites as favorites",
+            "deviations.deviationid as deviationid",
+            "deviations.title as title",
+            "deviations.url as url",
+            "deviations.published_time as published_time",
+            "deviations.stats.favourites as favorites",
         ],
     )
+
+    if gallery != 'all':
+        query = query.join(DeviationMetadata, on="deviationid")
+        query = query.from_clause("unnest(deviation_metadata.galleries)")
+        query = query.where(f"unnest.folderid = '{gallery}'")
 
     if start_time or end_time:
         query = (
             query.join(DeviationActivity, on="deviationid", how="left")
             .select(
-                "deviationid", "title", "url", "published_time", "count(*) as favorites"
-            )
-            .group_by("deviations.*")
-            .order_by("count(*) desc, published_time")
+                "deviationid", "deviations.title", "deviations.url", "deviations.published_time","count(*) as favorites")
+            .group_by("all")
+            .order_by("count(*) desc, deviations.published_time")
         )
         if start_time:
             query = query.where(f"timestamp >= '{start_time}'")
         if end_time:
             query = query.where(f"timestamp <= '{end_time}'")
     else:
-        query = query.order_by("stats.favourites desc")
+        query = query.order_by("deviations.stats.favourites desc, deviations.published_time")
 
     with duckdb.connect(
         "deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}
@@ -42,7 +46,7 @@ def top_by_activity(start_time=None, end_time=None, limit=10):
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-def get_user_data(start_time, end_time, limit=10):
+def get_user_data(start_time, end_time, limit=10, gallery="all"):
 
     # Connect to the database
     query = (
@@ -52,6 +56,11 @@ def get_user_data(start_time, end_time, limit=10):
         .group_by("userid", "username")
         .order_by("count(*) desc")
     )
+
+    if gallery != 'all':
+        query = query.join(DeviationMetadata, on="deviationid")
+        query = query.from_clause(" unnest(deviation_metadata.galleries)")
+        query = query.where(f"unnest.folderid = '{gallery}'")
 
     if start_time:
         query = query.where(f"timestamp >= '{start_time}'")
@@ -120,23 +129,34 @@ def get_deviation_activity(deviationid, start_date):
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-def get_publication_data(start_date, end_date):
+def get_publication_data(start_date, end_date, gallery="all"):
+    if gallery == 'all':
+        gallery = None
+
     if not start_date:
         start_date = datetime(1970, 1, 1)
     if not end_date:
         end_date = datetime.now()
 
+    if gallery:
+        gallery_join = f"join deviation_metadata using (deviationid), unnest(deviation_metadata.galleries)"
+        gallery_where = f"unnest.folderid = '{gallery}'"
+
     query = f"""
     with deviationas as (
-        SELECT to_timestamp(published_time::bigint)::date as date, COUNT(*) as count 
+        SELECT to_timestamp(published_time::bigint)::date as date, COUNT(distinct deviationid) as count 
         FROM deviations
+        {gallery_join if gallery else ''}
         WHERE published_time::bigint >= '{start_date.timestamp()}' AND published_time::bigint <= '{end_date.timestamp()}'
+        {" and " +gallery_where if gallery else ''}
         GROUP BY 1
         ORDER BY 1
     ), activity as (
-        SELECT timestamp::date as date, COUNT(*) as count
+        SELECT timestamp::date as date, COUNT(distinct deviationid) as count
         FROM deviation_activity
+        {gallery_join if gallery else ''}
         WHERE timestamp >= '{start_date}' AND timestamp <= '{end_date}'
+        {" and " +gallery_where if gallery else ''}
         GROUP BY 1
         ORDER BY 1
     )
@@ -149,7 +169,7 @@ def get_publication_data(start_date, end_date):
         "deviantart_data.db", read_only=True, config={"access_mode": "READ_ONLY"}
     ) as conn:
         with conn.cursor() as cursor:
-            logger.info(query)
+            logger.debug(query)
             cursor.execute(query)
             columns = [col[0].lower() for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]

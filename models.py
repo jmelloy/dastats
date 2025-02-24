@@ -31,6 +31,7 @@ class Select:
         self.group_by_columns = []
         self.having_clauses = []
         self.order_by_columns = []
+        self.from_clauses = []
 
         if columns != "*":
             if isinstance(columns, str):
@@ -43,6 +44,14 @@ class Select:
         if columns:
             self.columns = ", ".join(columns)
         return self
+        
+    def from_clause(self, model: Union["BaseModel", str]):
+        if type(model) is str:
+            self.from_clauses.append(model)
+        else:
+            self.from_clauses.append(model.table_name)
+        return self
+
 
     def join(
         self, model: Union["BaseModel", str], *, how="inner", on=None, condition=None
@@ -87,6 +96,11 @@ class Select:
 
         if self.joins:
             query += " " + " ".join(self.joins)
+
+        if self.from_clauses:
+            if self.joins:
+                query += ","
+            query += ",".join(self.from_clauses)
 
         if self.where_clauses:
             query += " WHERE " + " AND ".join(self.where_clauses)

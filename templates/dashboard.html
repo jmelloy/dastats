@@ -24,7 +24,7 @@
       <div class="container-fluid">
         <div class="navbar-nav ms-auto">
           <div class="nav-item dropdown me-3">
-            <select class="form-select" id="gallerySelect">
+            <select class="form-select" id="gallerySelect" onchange="updateAll()">
               <option value="all">All Galleries</option>
             </select>
             <script>
@@ -75,12 +75,32 @@
           <canvas id="publicationChart" style="min-height: 200px; max-height: 250px;"></canvas>
           <script>
             function updatePublicationChart() {
+              // Show loading spinner while fetching data
+              const existingChart = Chart.getChart("publicationChart");
+              if (existingChart) {
+                existingChart.destroy();
+              }
+
+              const ctx = document.getElementById('publicationChart').getContext('2d');
+              ctx.save();
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.font = '16px Arial';
+              ctx.fillStyle = '#6c757d';
+              
+              // Clear canvas and draw loading text/spinner
+              ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+              ctx.fillText('Loading...', ctx.canvas.width/2, ctx.canvas.height/2);
+              ctx.restore();
+
               const startDate = document.getElementById('startDate').value;
               const endDate = document.getElementById('endDate').value;
+              const gallery = document.getElementById('gallerySelect').value;
 
               const queryParams = new URLSearchParams({
                 start_date: startDate,
-                end_date: endDate
+                end_date: endDate,
+                gallery: gallery
               }).toString();
 
               fetch(`/get-publication-data?${queryParams}`)
@@ -108,11 +128,6 @@
                   }
                   
                   data.data = filledData;
-                  // Destroy existing chart if it exists
-                  const existingChart = Chart.getChart("publicationChart");
-                  if (existingChart) {
-                    existingChart.destroy();
-                  }
 
                   // Create new chart with zoom plugin
                   const chart = new Chart("publicationChart", {
@@ -267,6 +282,7 @@
       const startDate = document.getElementById('startDate').value;
       const endDate = document.getElementById('endDate').value;
       const limit = document.getElementById('limitSelect').value;
+      const gallery = document.getElementById('gallerySelect').value;
 
       // Show loading spinner while fetching data
       document.getElementById('deviationTable').innerHTML = `
@@ -282,7 +298,8 @@
       const queryParams = new URLSearchParams({
         start_date: startDate,
         end_date: endDate,
-        limit: limit
+        limit: limit,
+        gallery: gallery
       }).toString();
 
       fetch(`/update-table?${queryParams}`)
@@ -311,11 +328,12 @@
       const startDate = document.getElementById('startDate').value;
       const endDate = document.getElementById('endDate').value;
       const limit = document.getElementById('topUserlimitSelect').value;
-      
+      const gallery = document.getElementById('gallerySelect').value;
       const queryParams = new URLSearchParams({
         start_date: startDate,
         end_date: endDate, 
-        limit: limit
+        limit: limit,
+        gallery: gallery
       }).toString();
 
       fetch(`/get-users?${queryParams}`)

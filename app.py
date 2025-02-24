@@ -121,7 +121,7 @@ def update_table():
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     limit = request.args.get("limit", 10)
-
+    gallery = request.args.get("gallery")
     logger.info(f"Updating table for {start_date} to {end_date} with limit {limit}")
 
     if start_date:
@@ -130,7 +130,7 @@ def update_table():
     if end_date:
         end_date = datetime.fromisoformat(end_date)
 
-    table_data = top_by_activity(start_date, end_date, limit)
+    table_data = top_by_activity(start_date, end_date, limit, gallery)
 
     return render_template("partials/table.html", table_data=table_data)
 
@@ -163,9 +163,11 @@ def get_by_publication_date():
     if end_date:
         end_date = datetime.fromisoformat(end_date)
 
+    gallery = request.args.get("gallery")
+
     logger.info(f"Getting publication data for {start_date} to {end_date}")
     return jsonify(
-        {"status": "success", "data": get_publication_data(start_date, end_date)}
+        {"status": "success", "data": get_publication_data(start_date, end_date, gallery)}
     )
 
 
@@ -180,6 +182,7 @@ def get_users():
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     limit = request.args.get("limit", 10)
+    gallery = request.args.get("gallery")
 
     if start_date:
         start_date = datetime.fromisoformat(start_date)
@@ -187,10 +190,10 @@ def get_users():
     if end_date:
         end_date = datetime.fromisoformat(end_date)
 
-    logger.info(f"Updating users for {start_date} to {end_date} with limit {limit}")
+    logger.info(f"Updating users for {start_date} to {end_date} with limit {limit} and gallery {gallery}")
 
     return jsonify(
-        {"status": "success", "data": get_user_data(start_date, end_date, limit)}
+        {"status": "success", "data": get_user_data(start_date, end_date, limit, gallery)}
     )
 
 
@@ -198,6 +201,10 @@ if __name__ == "__main__":
     # t = threading.Thread(target=populate_hourly)
     # t.daemon = True
     # t.start()
+
+    # Enable debug logging for SQL queries
+    logging.getLogger('sql').setLevel(logging.DEBUG)
+    logging.getLogger('models').setLevel(logging.DEBUG)
 
     logger.info("Starting app")
 

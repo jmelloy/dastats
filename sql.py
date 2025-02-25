@@ -59,8 +59,8 @@ def get_user_data(start_time, end_time, limit=10, gallery="all"):
     query = (
         Select(DeviationActivity)
         .join(User, on="userid")
-        .select("userid", "username", "count(*) as favorites")
-        .group_by("userid", "username")
+        .select("userid", "username", "usericon", "count(*) as favorites")
+        .group_by("userid", "username", "usericon")
         .order_by("count(*) desc")
     )
 
@@ -86,7 +86,7 @@ def calculate_grouping_minutes(start_date, end_date, max_groups=100):
     if not end_date:
         end_date = datetime.now(tz=start_date.tzinfo)
     return 1440
-    
+
     diff_minutes = int((end_date - start_date).total_seconds() / 60)
 
     if diff_minutes <= 1440 * 3:  # 3 days

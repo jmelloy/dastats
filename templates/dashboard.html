@@ -427,7 +427,7 @@
             if (!startDate && !endDate) {
                 tr.innerHTML = `
                   <td><img src="/thumbs/${row.deviationid}" alt="Thumbnail" style="width: 50px;"></td>
-                <td>${row.title}</td>
+                <td><a href="https://www.deviantart.com/deviation/${row.deviationid}" target="_blank">${row.title}</a></td>
                 <td>${row.favorites}</td>
                 <td>${row.views}</td>
                 <td>${row.comments}</td>
@@ -437,7 +437,7 @@
             } else {
               tr.innerHTML = `
                 <td><img src="/thumbs/${row.deviationid}" alt="Thumbnail" style="width: 50px;"></td>
-                <td>${row.title}</td>
+                <td><a href="https://www.deviantart.com/deviation/${row.deviationid}" target="_blank">${row.title}</a></td>
                 <td>${row.favorites}</td>
                 <td id="sparkline-${row.deviationid}"></td>
               `;
@@ -562,7 +562,8 @@
             data.data.forEach(user => {
               const row = document.createElement('tr');
               row.innerHTML = `
-                <td><a href="https://www.deviantart.com/${user.username}">${user.username}</a></td>
+                <td><img src="${user.usericon}" alt="User Icon""></td>
+                <td><a href="https://www.deviantart.com/${user.username}" target="_blank">${user.username}</a></td>
                 <td>${user.favorites}</td>
               `;
               userTable.appendChild(row);

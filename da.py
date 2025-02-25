@@ -217,19 +217,26 @@ class DeviantArt:
 
     def get_metadata(self, deviation_ids: list) -> Iterator[DeviationMetadata]:
         batch_size = 10
+        sleep_time = 1
 
-        for i in range(0, len(deviation_ids), batch_size):
-            batch = deviation_ids[i : i + batch_size]
-            if batch:
-                url = f"{API_BASE_URL}/deviation/metadata"
-                params = {
-                    "deviationids[]": batch,
-                    "access_token": self.access_token,
-                    "ext_camera": "true",
-                    "ext_stats": "true",
-                    "ext_collection": "true",
-                    "ext_gallery": "true",
-                }
+        def get_batch():
+            a = []
+            for i in range(0, min(batch_size, len(deviation_ids))):
+                a.append(deviation_ids.pop(0))
+            return a
+
+        batch = get_batch()
+        while batch:
+            url = f"{API_BASE_URL}/deviation/metadata"
+            params = {
+                "deviationids[]": batch,
+                "access_token": self.access_token,
+                "ext_camera": "true",
+                "ext_stats": "true",
+                "ext_collection": "true",
+                "ext_gallery": "true",
+            }
+            try:
                 logger.info(
                     f"Fetching metadata for {len(batch)} deviations - {batch[0]} - {batch[-1]}"
                 )
@@ -239,7 +246,18 @@ class DeviantArt:
                 for item in metadata:
                     yield DeviationMetadata.from_json(item)
 
-                time.sleep(1)
+                sleep_time = max(1, sleep_time / 2)
+
+                batch = get_batch()
+            except Exception as e:
+                if e.response.status_code == 429:
+                    logger.info(f"Rate limited, sleeping for {sleep_time} seconds")
+                    sleep_time *= 2
+                else:
+                    logger.error(f"Error fetching metadata for {batch}: {e}")
+                    raise e
+            
+            time.sleep(sleep_time)
 
     def whoami(self):
         return raise_for_status(
@@ -271,8 +289,8 @@ def populate_gallery(
                         with open(f"thumbs/{item.deviationid}.jpg", "wb") as F:
                             F.write(res.content)
                         break
-        
-        item.insert(db, conflict_mode="ignore")
+
+        item.upsert(db, cols=["printid", "url", "title", "is_favourited", "is_deleted", "is_published", "is_blocked", "author", "user_id", "stats", "published_time", "allows_comments", "tier", "preview", "content"])
         
 
 def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
@@ -361,7 +379,7 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
         time.sleep(1)
 
 
-def populate(da: DeviantArt):
+def populate(da: DeviantArt, full=False):
     da.check_token()
     with duckdb.connect("deviantart_data.db", read_only=False) as db:
         for table in [
@@ -381,9 +399,11 @@ def populate(da: DeviantArt):
         deviations = db.execute("select count(*) from deviations").fetchone()[0]
         logger.info(f"Deviations: {deviations}")
 
-        populate_gallery(da, db, gallery="all", offset=deviations)
+        populate_gallery(da, db, gallery="all", offset=deviations if not full else 0)
         populate_metadata(da, db)
         populate_favorites(da, db)
+
+        # populate_gallery(da, db, gallery="all", offset=0)
 
 
 if __name__ == "__main__":
@@ -392,6 +412,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug", action="store_true")
+
+    parser.add_argument("--full", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -402,7 +424,7 @@ if __name__ == "__main__":
     da = DeviantArt()
     da.check_token()
 
-    populate(da)
+    populate(da, args.full)
 
     print("Data collection completed.")
 

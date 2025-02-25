@@ -345,6 +345,7 @@
             <table class="table table-hover">
               <thead>
                 <tr>
+                  <th></th>
                   <th>User</th>
                   <th>Favorites</th>
                 </tr>
@@ -409,7 +410,7 @@
           if (!startDate && !endDate) {
           header.innerHTML = `
             <tr>
-              <th>Thumbnail</th>
+              <th></th>
               <th>Title</th>
               <th>Favorites</th>
               <th>Views</th>
@@ -420,7 +421,7 @@
           } else {
             header.innerHTML = `
               <tr>
-                <th>Thumbnail</th>
+                <th></th>
                 <th>Title</th>
                 <th>Favorites</th>
                 <th>Sparkline</th>
@@ -436,7 +437,7 @@
             
             if (!startDate && !endDate) {
                 tr.innerHTML = `
-                  <td><img src="/thumbs/${row.deviationid}" alt="Thumbnail" style="width: 50px;"></td>
+                  <td><img src="/thumbs/${row.deviationid}" alt="thumbnail" style="width: 50px;"></td>
                 <td><a class="deviation-link" href="https://www.deviantart.com/deviation/${row.deviationid}" target="_blank">${row.title}</a></td>
                 <td>${row.favorites}</td>
                 <td>${row.views}</td>

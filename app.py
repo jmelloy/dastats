@@ -134,18 +134,33 @@ def update_table():
 
     table_data = top_by_activity(start_date, end_date, limit, gallery)
 
-    return render_template("partials/table.html", table_data=table_data)
+    return jsonify({"status": "success", "data": table_data})
 
 
 @app.route("/get-sparkline-data", methods=["POST"])
 def get_sparkline_data():
-    event_id = request.json.get("id")
-    date_str = request.json.get("date")
-    if event_id:
-        # Simulate event-specific data points
-        sparkline_data = get_deviation_activity(event_id, date_str)
+    deviation_id = request.json.get("id")
+    
+    start_date = request.json.get("start_date")
+    end_date = request.json.get("end_date")
+
+    if start_date:
+        start_date = datetime.fromisoformat(start_date)
+
+    if end_date:
+        end_date = datetime.fromisoformat(end_date)
+    else:
+        end_date = datetime.now()
+    
+    logger.info(f"Getting sparkline data for {deviation_id} from {start_date} to {end_date}")
+
+    if deviation_id and start_date and end_date:
+        sparkline_data = get_deviation_activity(deviation_id, start_date, end_date)
         return jsonify({"status": "success", "data": sparkline_data})
-    return jsonify({"status": "error", "message": "Invalid event ID"}), 400
+    
+
+
+    return jsonify({"status": "error", "message": "Invalid deviation ID"}), 400
 
 
 @app.route("/thumbs/<deviation_id>")

@@ -226,7 +226,7 @@
         <div class="card-body">
           <div class="table-responsive">
             <table class="table table-hover">
-              <thead>
+              <thead id="deviationTableHeader">
                 <tr>
                   <th>Thumbnail</th>
                   <th class="sortable" onclick="sortTable(1)">Title</th>
@@ -360,7 +360,7 @@
 
       title = `Top Deviations`;
       if (startDate) {
-        title += `${startDate}`;
+        title += ` ${startDate}`;
       }
       if (endDate) {
         title += ` - ${endDate}`;
@@ -391,13 +391,140 @@
       }).toString();
 
       fetch(`/update-table?${queryParams}`)
-        .then(response => response.text())
-      .then(html => {
-        document.getElementById('deviationTable').innerHTML = html;
-      });
+        .then(response => response.json())
+        .then(data => {
+
+          const header = document.getElementById('deviationTableHeader');
+          header.innerHTML = '';
+          if (!startDate && !endDate) {
+          header.innerHTML = `
+            <tr>
+              <th>Thumbnail</th>
+              <th>Title</th>
+              <th>Favorites</th>
+              <th>Views</th>
+              <th>Comments</th>
+              <th>Downloads</th>
+            </tr>
+          `;
+          } else {
+            header.innerHTML = `
+              <tr>
+                <th>Thumbnail</th>
+                <th>Title</th>
+                <th>Favorites</th>
+                <th>Sparkline</th>
+              </tr>
+            `;
+          }
+
+          const table = document.getElementById('deviationTable');
+          table.innerHTML = '';
+
+          data.data.forEach(row => {
+            const tr = document.createElement('tr');
+            
+            if (!startDate && !endDate) {
+                tr.innerHTML = `
+                  <td><img src="/thumbs/${row.deviationid}" alt="Thumbnail" style="width: 50px;"></td>
+                <td>${row.title}</td>
+                <td>${row.favorites}</td>
+                <td>${row.views}</td>
+                <td>${row.comments}</td>
+                <td>${row.downloads}</td>
+              `;
+              table.appendChild(tr);
+            } else {
+              tr.innerHTML = `
+                <td><img src="/thumbs/${row.deviationid}" alt="Thumbnail" style="width: 50px;"></td>
+                <td>${row.title}</td>
+                <td>${row.favorites}</td>
+                <td id="sparkline-${row.deviationid}"></td>
+              `;
+              table.appendChild(tr);
+              getSparklineData(row.deviationid, document.getElementById(`sparkline-${row.deviationid}`));
+            }
+          });
+        });
     }
 
   </script>
+
+  <script>
+    // Function to fetch and display sparkline data for a deviation
+    function getSparklineData(deviationId, element) {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+
+      fetch('/get-sparkline-data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          id: deviationId,
+          start_date: startDate,
+          end_date: endDate
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.status === 'success') {
+          // Create sparkline using data.data
+          const sparklineData = data.data.map(d => d.count || 0);
+          
+          // Clear any existing content
+          element.innerHTML = '';
+          
+          // Create sparkline chart
+          const sparkline = document.createElement('canvas');
+          // sparkline.style.height = '30px';
+          sparkline.style.width = '100px';
+          element.appendChild(sparkline);
+
+          new Chart(sparkline, {
+            type: 'line',
+            data: {
+              labels: data.data.map(d => new Date(d.timestamp).toLocaleDateString()),
+              datasets: [{
+                data: sparklineData,
+                borderColor: 'rgba(54, 162, 235, 1)', 
+                borderWidth: 1,
+                fill: false,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                pointHoverBackgroundColor: 'rgba(54, 162, 235, 1)',
+                pointHoverBorderColor: 'rgba(54, 162, 235, 1)',
+                pointHitRadius: 10
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  display: false
+                }
+              },
+              scales: {
+                x: {
+                  display: false
+                },
+                y: {
+                  display: false,
+                }
+              }
+            }
+          });
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching sparkline data:', error);
+        element.innerHTML = '<span class="text-danger">Error</span>';
+      });
+    }
+  </script>
+
 
   <script>
     // Function to fetch and display top users data

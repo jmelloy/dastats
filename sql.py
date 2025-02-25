@@ -81,12 +81,13 @@ def get_user_data(start_time, end_time, limit=10, gallery="all"):
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-def calculate_grouping_minutes(start_date, max_groups=100):
+def calculate_grouping_minutes(start_date, end_date, max_groups=100):
     """Calculates the number of minutes for grouping, expanding as the date range increases."""
-    start_date = datetime.fromisoformat(start_date)
-    now = datetime.now(tz=start_date.tzinfo)
-
-    diff_minutes = int((now - start_date).total_seconds() / 60)
+    if not end_date:
+        end_date = datetime.now(tz=start_date.tzinfo)
+    return 1440
+    
+    diff_minutes = int((end_date - start_date).total_seconds() / 60)
 
     if diff_minutes <= 1440 * 3:  # 3 days
         return 15
@@ -98,16 +99,16 @@ def calculate_grouping_minutes(start_date, max_groups=100):
         return 60 * 24
 
 
-def get_deviation_activity(deviationid, start_date):
-    grouping_minutes = calculate_grouping_minutes(start_date)
-    table_name = DeviationActivity.table_name
+def get_deviation_activity(deviationid, start_date, end_date):
+    grouping_minutes = calculate_grouping_minutes(start_date, end_date)
 
     query = f"""
         WITH grouped_data AS (
             SELECT to_timestamp((extract(epoch from timestamp) / {grouping_minutes * 60})::int * {grouping_minutes * 60}) as time_bucket,
                    COUNT(*) as count
-            FROM {table_name}
+            FROM {DeviationActivity.table_name}
             WHERE timestamp >= '{start_date}'
+            AND timestamp <= '{end_date}'
             AND deviationid = '{deviationid}'
             GROUP BY time_bucket
         ),
@@ -115,7 +116,7 @@ def get_deviation_activity(deviationid, start_date):
             SELECT
                 gs.range as time_bucket
             FROM range(
-                to_timestamp((extract(epoch from '{start_date}'::TIMESTAMPTZ) / {grouping_minutes * 60})::int * {grouping_minutes * 60}), '{datetime.now()}'::TIMESTAMPTZ, INTERVAL '{grouping_minutes} minute'
+                to_timestamp((extract(epoch from '{start_date}'::TIMESTAMPTZ) / {grouping_minutes * 60})::int * {grouping_minutes * 60}), '{end_date}'::TIMESTAMPTZ, INTERVAL '{grouping_minutes} minute'
             ) gs
         )
         SELECT ts.time_bucket as timestamp, gd.count, COALESCE(gd.count, 0) as count

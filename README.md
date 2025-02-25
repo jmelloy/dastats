@@ -43,6 +43,4 @@ python app.py
 
 Then it should take you to the /stats/ page [http://127.0.0.1:8080/stats/]
 
-```
-
 After running through the login process, you can also run `python da.py` to populate the database. This will take a while, but it will be faster next time.  It may get rate limited by deviant art, so if that happen just stop and wait a bit.

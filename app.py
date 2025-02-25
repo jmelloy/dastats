@@ -19,9 +19,9 @@ from sql import (
 )
 
 import multiprocessing
-import threading
 import time
-import json
+
+file_path = os.path.dirname(os.path.abspath(__file__))
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -166,7 +166,7 @@ def get_sparkline_data():
 @app.route("/thumbs/<deviation_id>")
 def thumbs(deviation_id):
     return send_from_directory(
-        os.path.join(os.getcwd(), "thumbs"), f"{deviation_id}.jpg"
+        os.path.join(file_path, "thumbs"), f"{deviation_id}.jpg"
     )
 
 

@@ -20,6 +20,8 @@ from models import (
 
 logger = logging.getLogger(__name__)
 
+file_path = os.path.dirname(os.path.abspath(__file__))
+
 # Constants for DeviantArt API
 API_BASE_URL = "https://www.deviantart.com/api/v1/oauth2"
 COLLECTIONS_ENDPOINT = "/gallery/all"
@@ -280,7 +282,7 @@ def populate_gallery(
             r = author.insert(db, conflict_mode="replace")
             item.user_id = author.userid
         
-        if item.thumbs and not os.path.exists(f"thumbs/{item.deviationid}.jpg"):
+        if item.thumbs and not os.path.exists(f"{file_path}/thumbs/{item.deviationid}.jpg"):
             for thumb in item.thumbs:
                 if thumb.src:
                     os.makedirs("thumbs", exist_ok=True)

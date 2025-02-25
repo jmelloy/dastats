@@ -178,7 +178,6 @@ class DeviantArt:
             if not results:
                 break
 
-            # Insert deviations into the database
             for item in results:
                 yield Deviation.from_json(item)
 
@@ -262,20 +261,19 @@ def populate_gallery(
         if author:
             r = author.insert(db, conflict_mode="replace")
             item.user_id = author.userid
-        thumbs = item.thumbs
-        item.thumbs = None
-        item.insert(db, conflict_mode="replace")
-        item.thumbs = thumbs
-
-        if item.thumbs:
-            thumb = item.thumbs[0]
-
-            os.makedirs("thumbs", exist_ok=True)
-            res = requests.get(thumb.src)
-            if res.status_code == 200:
-                with open(f"thumbs/{item.deviationid}.jpg", "wb") as F:
-                    F.write(res.content)
-
+        
+        if item.thumbs and not os.path.exists(f"thumbs/{item.deviationid}.jpg"):
+            for thumb in item.thumbs:
+                if thumb.src:
+                    os.makedirs("thumbs", exist_ok=True)
+                    res = requests.get(thumb.src)
+                    if res.status_code == 200:
+                        with open(f"thumbs/{item.deviationid}.jpg", "wb") as F:
+                            F.write(res.content)
+                        break
+        
+        item.insert(db, conflict_mode="ignore")
+        
 
 def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
     select = Select(
@@ -374,8 +372,11 @@ def populate(da: DeviantArt):
             Collection,
             Gallery,
         ]:
-            logging.info(table.create_table_sql())
-            db.execute(table.create_table_sql())
+            logging.debug(table.create_table_sql())
+            rs = db.execute(table.create_table_sql())
+            if rs.rowcount > 0:
+                logger.info(f"Created table: {table.table_name}")
+
 
         deviations = db.execute("select count(*) from deviations").fetchone()[0]
         logger.info(f"Deviations: {deviations}")

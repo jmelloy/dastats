@@ -9,6 +9,8 @@ from flask import (
 from da import DeviantArt, populate
 
 import os
+import threading
+
 from datetime import datetime
 from sql import (
     top_by_activity,
@@ -39,26 +41,16 @@ logging.basicConfig(
 p = None
 
 
-def populate_da():
-    global p
-    try:
-        da.check_token()
-        p = multiprocessing.Process(target=populate, args=(da,))
-        p.daemon = True
-        p.start()
-    except Exception as e:
-        print(e)
-
-
 def populate_hourly():
     global p
-    time.sleep(10)
     while True:
         if p:
             p.join()
         else:
             try:
-                populate_da()
+                p = multiprocessing.Process(target=populate, args=(da,))
+                p.daemon = True
+                p.start()
             except Exception as e:
                 print(e)
         time.sleep(3600)
@@ -140,7 +132,7 @@ def update_table():
 @app.route("/get-sparkline-data", methods=["POST"])
 def get_sparkline_data():
     deviation_id = request.json.get("id")
-    
+
     start_date = request.json.get("start_date")
     end_date = request.json.get("end_date")
 
@@ -151,23 +143,21 @@ def get_sparkline_data():
         end_date = datetime.fromisoformat(end_date)
     else:
         end_date = datetime.now()
-    
-    logger.info(f"Getting sparkline data for {deviation_id} from {start_date} to {end_date}")
+
+    logger.info(
+        f"Getting sparkline data for {deviation_id} from {start_date} to {end_date}"
+    )
 
     if deviation_id and start_date and end_date:
         sparkline_data = get_deviation_activity(deviation_id, start_date, end_date)
         return jsonify({"status": "success", "data": sparkline_data})
-    
-
 
     return jsonify({"status": "error", "message": "Invalid deviation ID"}), 400
 
 
 @app.route("/thumbs/<deviation_id>")
 def thumbs(deviation_id):
-    return send_from_directory(
-        os.path.join(file_path, "thumbs"), f"{deviation_id}.jpg"
-    )
+    return send_from_directory(os.path.join(file_path, "thumbs"), f"{deviation_id}.jpg")
 
 
 @app.route("/get-publication-data")
@@ -226,6 +216,7 @@ if __name__ == "__main__":
     # t = threading.Thread(target=populate_hourly)
     # t.daemon = True
     # t.start()
+
 
     logger.info("Starting app")
 

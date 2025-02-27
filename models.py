@@ -12,11 +12,14 @@ from typing import (
 )
 import uuid
 import logging
-from duckdb import DuckDBPyConnection
+import sqlite3
+
 from datetime import datetime
+import json
+
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.DEBUG)
 
 class Select:
     def __init__(self, model: Union["BaseModel", str], columns="*"):
@@ -66,7 +69,7 @@ class Select:
         elif condition:
             self.joins.append(f"{how} JOIN {table} ON {condition}")
         else:
-            raise ValueError("Either column or condition must be provided.")
+            self.joins.append(f", {table}")
         return self
 
     def where(self, condition):
@@ -134,9 +137,9 @@ def get_sql_type(field_type: Any) -> str:
         str: "VARCHAR",
         float: "DOUBLE",
         bool: "BOOLEAN",
-        dict: "JSON",
-        list: "JSON",  # Arrays and lists default to JSON
-        BaseModel: "STRUCT",  # Nested dataclasses map to STRUCT
+        dict: "JSONB",
+        list: "JSONB",  # Arrays and lists default to JSON
+        BaseModel: "JSONB",  # Nested dataclasses map to STRUCT
         uuid.UUID: "UUID",
         datetime: "TIMESTAMP",
     }
@@ -155,6 +158,7 @@ def get_sql_type(field_type: Any) -> str:
 
     # Check for nested dataclass
     if hasattr(field_type, "__dataclass_fields__"):
+        return "JSON"
         nested_columns = []
         for nested_field_name, nested_field_type in get_type_hints(field_type).items():
             if nested_field_name == "table_name":
@@ -165,6 +169,25 @@ def get_sql_type(field_type: Any) -> str:
 
     # Return the DuckDB equivalent type or 'TEXT' if unknown
     return type_mapping.get(field_type, "TEXT")
+
+
+def convert_type(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return json.dumps(value.to_dict(), cls=BaseModelEncoder)
+    if isinstance(value, dict):
+        return json.dumps(value, cls=BaseModelEncoder)
+    if isinstance(value, list):
+        return json.dumps([convert_type(v) for v in value], cls=BaseModelEncoder)
+    return value
+
+
+class BaseModelEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, BaseModel):
+            return obj.to_dict()
+        return super().default(obj)
 
 
 @dataclass
@@ -204,7 +227,11 @@ class BaseModel:
         type_hints = get_type_hints(cls)
         init_args = {}
         for field_name, field_type in type_hints.items():
-            if field_name == "table_name":
+            if (
+                field_name == "table_name"
+                or field_name == "created_at"
+                or field_name == "updated_at"
+            ):
                 continue
             value = data.get(field_name)
 
@@ -241,40 +268,41 @@ class BaseModel:
 
     def insert(
         self,
-        conn: DuckDBPyConnection,
+        conn: sqlite3.Connection,
         *,
         conflict_mode: Literal["ignore", "replace"] = None,
     ) -> str:
 
         # Convert any BaseModel values to their JSON representation
         non_null_cols = {
-            col: (
-                value.to_dict()
-                if isinstance(value, BaseModel)
-                else [v.to_dict() for v in value] if isinstance(value, list) else value
-            )
+            col: convert_type(value)
             for col, value in self.to_dict().items()
             if value is not None
         }
 
-        cols = ", ".join(non_null_cols.keys())
-        values = ", ".join(f"?" for f in non_null_cols.keys())
+        non_null_cols["created_at"] = datetime.now().isoformat()
+        non_null_cols["updated_at"] = datetime.now().isoformat()
 
-        sql = f"INSERT {f'OR {conflict_mode}' if conflict_mode else ''} INTO {self.table_name} ({cols}) VALUES ({values})"
+        cols = ", ".join(non_null_cols.keys())
+        values = ", ".join(f":{f}" for f in non_null_cols.keys())
+
+        if not conflict_mode:
+            sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({values})"
+        if conflict_mode == "ignore":
+            sql = f"INSERT OR IGNORE INTO {self.table_name} ({cols}) VALUES ({values})"
+        if conflict_mode == "replace":
+            sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({values}) ON CONFLICT DO UPDATE SET {', '.join(f'{col} = excluded.{col}' for col in non_null_cols.keys() if col != 'created_at' and col not in self.pk())}"
 
         logger.debug(sql)
-        return conn.execute(f"{sql};", non_null_cols.values())
+
+        return conn.execute(f"{sql};", non_null_cols)
 
     def update(self, conn, cols=None) -> str:
         if not cols:
             cols = self.columns
 
         columns = {
-            col: (
-                value.to_dict()
-                if isinstance(value, BaseModel)
-                else [v.to_dict() for v in value] if isinstance(value, list) else value
-            )
+            col: convert_type(value)
             for col, value in self.to_dict().items()
             if col not in self.pk() and col in cols
         }
@@ -305,7 +333,9 @@ class BaseModel:
         )
 
     @classmethod
-    def create_table_sql(cls) -> str:
+    def create_table_sql(cls, table_name: str = None) -> str:
+        if table_name:
+            cls.table_name = table_name
 
         columns = []
         primary_keys = []
@@ -458,6 +488,8 @@ class Deviation(BaseModel):
     download_filesize: Optional[int]
     motion_book: Optional[MotionBook]
 
+    created_at: datetime = field(init=False, default_factory=datetime.now)
+    updated_at: datetime = field(init=False, default_factory=datetime.now)
 
 @dataclass
 class DeviationActivity(BaseModel):
@@ -471,6 +503,10 @@ class DeviationActivity(BaseModel):
     time: int = field(metadata={"primary_key": True})
 
     timestamp: datetime
+
+    created_at: datetime = field(init=False, default_factory=datetime.now)
+    updated_at: datetime = field(init=False, default_factory=datetime.now)
+
 
 
 @dataclass
@@ -542,3 +578,6 @@ class DeviationMetadata(BaseModel):
     collections: Optional[List[Collection]]
     galleries: Optional[List[Gallery]]
     can_post_comment: bool
+
+    created_at: datetime = field(init=False, default_factory=datetime.now)
+    updated_at: datetime = field(init=False, default_factory=datetime.now)

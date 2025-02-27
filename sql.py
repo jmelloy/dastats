@@ -1,6 +1,7 @@
-import duckdb
+import sqlite3
 from models import *
 from datetime import datetime, timedelta
+from da import SQLITE_DATABASE
 
 
 def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
@@ -13,16 +14,16 @@ def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
             "deviations.title as title",
             "deviations.url as url",
             "deviations.published_time as published_time",
-            "coalesce(deviation_metadata.stats.favourites, deviations.stats.favourites) as favorites",
-            "deviation_metadata.stats.views as views",
-            "deviation_metadata.stats.comments as comments",
-            "deviation_metadata.stats.downloads as downloads",
+            "cast(coalesce(deviation_metadata.stats->'favourites', deviations.stats->'favourites') as int) as favorites",
+            "cast(deviation_metadata.stats->'views' as int) as views",
+            "cast(deviation_metadata.stats->'comments' as int) as comments",
+            "cast(deviation_metadata.stats->'downloads' as int) as downloads",
         ],
     ).join(DeviationMetadata, on="deviationid", how="left")
 
     if gallery != "all":
-        query = query.from_clause("unnest(deviation_metadata.galleries)")
-        query = query.where(f"unnest.folderid = '{gallery}'")
+        query = query.join("json_each(deviation_metadata.galleries) as gallery")
+        query = query.where(f"gallery.value->>'folderid' = '{gallery}'")
 
     if start_time or end_time:
         query = (
@@ -43,14 +44,14 @@ def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
             query = query.where(f"timestamp <= '{end_time}'")
     else:
         query = query.order_by(
-            "deviations.stats.favourites desc, deviations.published_time"
+            "cast(deviations.stats->'favourites' as int) desc, deviations.published_time"
         )
-
-    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(query.sql(limit=limit))
-            columns = [col[0].lower() for col in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    
+    with sqlite3.connect(SQLITE_DATABASE) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query.sql(limit=limit))
+        columns = [col[0].lower() for col in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def get_user_data(start_time, end_time, limit=10, gallery="all"):
@@ -66,19 +67,19 @@ def get_user_data(start_time, end_time, limit=10, gallery="all"):
 
     if gallery != "all":
         query = query.join(DeviationMetadata, on="deviationid")
-        query = query.from_clause(" unnest(deviation_metadata.galleries)")
-        query = query.where(f"unnest.folderid = '{gallery}'")
+        query = query.from_clause("json_each(deviation_metadata.galleries) as gallery")
+        query = query.where(f"gallery.value->>'folderid' = '{gallery}'")
 
     if start_time:
         query = query.where(f"timestamp >= '{start_time}'")
     if end_time:
         query = query.where(f"timestamp <= '{end_time}'")
 
-    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(query.sql(limit=limit))
-            columns = [col[0].lower() for col in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    with sqlite3.connect(SQLITE_DATABASE) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query.sql(limit=limit))
+        columns = [col[0].lower() for col in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def calculate_grouping_minutes(start_date, end_date, max_groups=100):
@@ -126,11 +127,11 @@ def get_deviation_activity(deviationid, start_date, end_date):
         ORDER BY ts.time_bucket
     """
 
-    with duckdb.connect("deviantart_data.db", True) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(query)
-            columns = [col[0].lower() for col in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    with sqlite3.connect(SQLITE_DATABASE) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query)
+        columns = [col[0].lower() for col in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def get_publication_data(start_date, end_date, gallery="all"):
@@ -148,18 +149,18 @@ def get_publication_data(start_date, end_date, gallery="all"):
 
     query = f"""
     with deviationas as (
-        SELECT to_timestamp(published_time::bigint)::date as date, COUNT(distinct deviationid) as count 
+        SELECT date(published_time, 'unixepoch') as date, COUNT(distinct deviationid) as count 
         FROM deviations
         {gallery_join if gallery else ''}
-        WHERE published_time::bigint >= '{start_date.timestamp()}' AND published_time::bigint <= '{end_date.timestamp()}'
+        WHERE date(published_time, 'unixepoch') >= '{start_date}' AND date(published_time, 'unixepoch') <= '{end_date}'
         {" and " +gallery_where if gallery else ''}
         GROUP BY 1
         ORDER BY 1
     ), activity as (
-        SELECT timestamp::date as date, COUNT(distinct deviationid) as count
+        SELECT date(timestamp) as date, COUNT(distinct deviationid) as count
         FROM deviation_activity
         {gallery_join if gallery else ''}
-        WHERE timestamp >= '{start_date}' AND timestamp <= '{end_date}'
+        WHERE date(timestamp) >= '{start_date}' AND date(timestamp) <= '{end_date}'
         {" and " +gallery_where if gallery else ''}
         GROUP BY 1
         ORDER BY 1
@@ -168,25 +169,25 @@ def get_publication_data(start_date, end_date, gallery="all"):
     FROM activity
     FULL OUTER JOIN deviationas ON activity.date = deviationas.date
     """
-
-    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
-        with conn.cursor() as cursor:
-            logger.debug(query)
-            cursor.execute(query)
-            columns = [col[0].lower() for col in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    
+    with sqlite3.connect(SQLITE_DATABASE) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query)
+        columns = [col[0].lower() for col in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def get_gallery_data():
     query = """
         SELECT folderid, name || ' (' || count(*) || ')' as name
-        FROM galleries, deviation_metadata, unnest(deviation_metadata.galleries)
-        WHERE folderid = unnest.folderid
+        FROM galleries, deviation_metadata, json_each(deviation_metadata.galleries) as gallery
+        WHERE galleries.folderid = gallery.value->>'folderid'
         GROUP BY folderid, name
         ORDER BY count(*) DESC
     """
-    with duckdb.connect("deviantart_data.db", read_only=True) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(query)
-            columns = [col[0].lower() for col in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    with sqlite3.connect(SQLITE_DATABASE) as conn:
+        logger.debug(query)
+        cursor = conn.cursor()
+        cursor.execute(query)
+        columns = [col[0].lower() for col in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]

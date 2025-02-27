@@ -1,5 +1,5 @@
 import requests
-import duckdb
+import sqlite3
 import time
 import os
 import json
@@ -15,8 +15,8 @@ from models import (
     User,
     Collection,
     Gallery,
-    DeviationStats,
 )
+from utils import get_table_info, generate_alter_statements, create_temp_db_from_sql
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,8 @@ METADATA_ENDPOINT = "/deviation/metadata"
 AUTHORIZATION_BASE_URL = "https://www.deviantart.com/oauth2/authorize"
 TOKEN_URL = "https://www.deviantart.com/oauth2/token"
 REDIRECT_URI = "http://localhost:8080/callback"
+
+SQLITE_DATABASE = os.path.join(file_path, "deviantart_data.sqlite")
 
 
 def raise_for_status(response):
@@ -258,7 +260,7 @@ class DeviantArt:
                 else:
                     logger.error(f"Error fetching metadata for {batch}: {e}")
                     raise e
-            
+
             time.sleep(sleep_time)
 
     def whoami(self):
@@ -272,17 +274,17 @@ class DeviantArt:
         ).json()
 
 
-def populate_gallery(
-    da: DeviantArt, db: duckdb.DuckDBPyConnection, gallery="all", offset=0
-):
-    for item in da.get_all_deviations(gallery=gallery, offset=offset):
+def populate_gallery(da: DeviantArt, db: sqlite3.Connection, gallery="all", offset=0):
+    for i, item in enumerate(da.get_all_deviations(gallery=gallery, offset=offset)):
         logger.debug(item)
         author = item.author
         if author:
             r = author.insert(db, conflict_mode="replace")
             item.user_id = author.userid
-        
-        if item.thumbs and not os.path.exists(f"{file_path}/thumbs/{item.deviationid}.jpg"):
+
+        if item.thumbs and not os.path.exists(
+            f"{file_path}/thumbs/{item.deviationid}.jpg"
+        ):
             for thumb in item.thumbs:
                 if thumb.src:
                     os.makedirs("thumbs", exist_ok=True)
@@ -292,21 +294,30 @@ def populate_gallery(
                             F.write(res.content)
                         break
 
-        item.upsert(db, cols=["printid", "url", "title", "is_favourited", "is_deleted", "is_published", "is_blocked", "author", "user_id", "stats", "published_time", "allows_comments", "tier", "preview", "content"])
-        
+        item.insert(db, conflict_mode="replace")
+        if i % 100 == 0:
+            db.commit()
 
-def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
-    select = Select(
-        Deviation,
-        ["deviationid"],
+
+def populate_metadata(da: DeviantArt, db: sqlite3.Connection):
+    select = (
+        Select(
+            Deviation,
+            ["deviationid"],
+        )
+        .join(DeviationMetadata, on="deviationid", how="left")
+        .where(
+            "deviation_metadata.deviationid is null or deviation_metadata.updated_at < datetime('now', '-6 hours')"
+        )
     )
+    print(select.sql())
 
-    rows = db.execute(select.sql()).fetchall()
-
+    rs = db.execute(select.sql())
+    rows = rs.fetchall()
     logger.info(f"Fetching metadata for {len(rows)} deviations")
 
     deviation_ids = [str(row[0]) for row in rows]
-    for item in da.get_metadata(deviation_ids):
+    for i, item in enumerate(da.get_metadata(deviation_ids)):
         user = item.author
         if user:
             user.insert(db, conflict_mode="replace")
@@ -323,30 +334,35 @@ def populate_metadata(da: DeviantArt, db: duckdb.DuckDBPyConnection):
         db.execute(
             f"UPDATE deviations SET stats = ?, title = ? WHERE deviationid = ?",
             (
-                {
-                    "favourites": item.stats.favourites,
-                    "comments": item.stats.comments,
-                },
+                json.dumps(
+                    {
+                        "favourites": item.stats.favourites,
+                        "comments": item.stats.comments,
+                    }
+                ),
                 item.title,
                 item.deviationid,
             ),
         )
+        if i % 10 == 0:
+            db.commit()
+    db.commit()
 
 
-def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
+def populate_favorites(da: DeviantArt, db: sqlite3.Connection):
     select = (
         Select(
-            Deviation,
+            DeviationMetadata,
             [
                 "deviationid",
-                "stats.favourites",
+                "cast(stats->'favourites' as integer)",
                 f"count({DeviationActivity.table_name}.deviationid)",
             ],
         )
         .join(DeviationActivity, on="deviationid", how="left")
-        .group_by("deviationid", "stats.favourites")
+        .group_by("1,2")
         .having(
-            f"stats.favourites <> count({DeviationActivity.table_name}.deviationid)"
+            f"cast(stats->'favourites' as integer) <> count({DeviationActivity.table_name}.deviationid)"
         )
     )
     logger.info(select.sql())
@@ -367,7 +383,6 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
         for item in da.get_whofaved(deviation_id, offset=count):
             user = User.from_json(item.get("user"))
             if user:
-                user = User.from_json(item.get("user"))
                 user.insert(db, conflict_mode="replace")
 
                 a = DeviationActivity(
@@ -378,12 +393,13 @@ def populate_favorites(da: DeviantArt, db: duckdb.DuckDBPyConnection):
                     timestamp=datetime.fromtimestamp(item.get("time")),
                 )
                 a.insert(db, conflict_mode="ignore")
+        db.commit()
         time.sleep(1)
 
 
 def populate(da: DeviantArt, full=False):
     da.check_token()
-    with duckdb.connect("deviantart_data.db", read_only=False) as db:
+    with sqlite3.connect(SQLITE_DATABASE) as db:
         for table in [
             User,
             Deviation,
@@ -392,20 +408,33 @@ def populate(da: DeviantArt, full=False):
             Collection,
             Gallery,
         ]:
-            logging.debug(table.create_table_sql())
-            rs = db.execute(table.create_table_sql())
-            if rs.rowcount > 0:
-                logger.info(f"Created table: {table.table_name}")
+            existing = get_table_info(SQLITE_DATABASE, table.table_name)
+            if not existing["columns"]:
+                logging.info(table.create_table_sql())
+                db.execute(table.create_table_sql())
+                continue
 
+            new_info = create_temp_db_from_sql(table.create_table_sql())
+
+            alter_statements = generate_alter_statements(
+                existing, new_info, table.table_name
+            )
+
+            for stmt in alter_statements:
+                logging.info(stmt)
+                db.execute(stmt)
 
         deviations = db.execute("select count(*) from deviations").fetchone()[0]
         logger.info(f"Deviations: {deviations}")
 
         populate_gallery(da, db, gallery="all", offset=deviations if not full else 0)
-        populate_metadata(da, db)
-        populate_favorites(da, db)
+        db.commit()
 
-        # populate_gallery(da, db, gallery="all", offset=0)
+        populate_metadata(da, db)
+        db.commit()
+
+        populate_favorites(da, db)
+        db.commit()
 
 
 if __name__ == "__main__":
@@ -430,7 +459,7 @@ if __name__ == "__main__":
 
     print("Data collection completed.")
 
-    with duckdb.connect("deviantart_data.db", read_only=True) as db:
+    with sqlite3.connect(SQLITE_DATABASE) as db:
         df = db.execute(
             """SELECT title, stats.favourites, stats.comments, url
             FROM deviations order by stats.favourites + stats.comments desc limit 15"""

@@ -438,7 +438,7 @@
             if (!startDate && !endDate) {
                 tr.innerHTML = `
                   <td><img src="/thumbs/${row.deviationid}" alt="thumbnail" style="width: 50px;"></td>
-                <td><a class="deviation-link" href="https://www.deviantart.com/deviation/${row.deviationid}" target="_blank">${row.title}</a></td>
+                <td><a class="deviation-link" href="${row.url}" target="_blank">${row.title}</a></td>
                 <td>${row.favorites}</td>
                 <td>${row.views}</td>
                 <td>${row.comments}</td>
@@ -448,7 +448,7 @@
             } else {
               tr.innerHTML = `
                 <td><img src="/thumbs/${row.deviationid}" alt="Thumbnail" style="width: 50px;"></td>
-                <td><a href="https://www.deviantart.com/deviation/${row.deviationid}" target="_blank">${row.title}</a></td>
+                <td><a href="${row.url}" target="_blank">${row.title}</a></td>
                 <td>${row.favorites}</td>
                 <td id="sparkline-${row.deviationid}"></td>
               `;

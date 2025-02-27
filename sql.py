@@ -35,7 +35,12 @@ def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
                 "deviations.published_time",
                 "count(*) as favorites",
             )
-            .group_by("all")
+            .group_by(
+                "deviationid",
+                "deviations.title",
+                "deviations.url",
+                "deviations.published_time",
+            )
             .order_by("count(*) desc, deviations.published_time")
         )
         if start_time:
@@ -102,34 +107,50 @@ def calculate_grouping_minutes(start_date, end_date, max_groups=100):
 
 def get_deviation_activity(deviationid, start_date, end_date):
     grouping_minutes = calculate_grouping_minutes(start_date, end_date)
-
     query = f"""
         WITH grouped_data AS (
-            SELECT to_timestamp((extract(epoch from timestamp) / {grouping_minutes * 60})::int * {grouping_minutes * 60}) as time_bucket,
-                   COUNT(*) as count
-            FROM {DeviationActivity.table_name}
-            WHERE timestamp >= '{start_date}'
-            AND timestamp <= '{end_date}'
-            AND deviationid = '{deviationid}'
-            GROUP BY time_bucket
+            SELECT
+                (CAST(strftime('%s', timestamp) AS integer) /(:grouping_minutes * 60)) *(:grouping_minutes * 60) AS time_bucket,
+                COUNT(*) AS count
+            FROM
+                {DeviationActivity.table_name}
+            WHERE
+                timestamp >= :start_date
+                AND timestamp <= :end_date
+                AND deviationid = :deviationid
+            GROUP BY
+                time_bucket
         ),
         time_series AS (
+            -- Base case: start with the first timestamp
             SELECT
-                gs.range as time_bucket
-            FROM range(
-                to_timestamp((extract(epoch from '{start_date}'::TIMESTAMPTZ) / {grouping_minutes * 60})::int * {grouping_minutes * 60}), '{end_date}'::TIMESTAMPTZ, INTERVAL '{grouping_minutes} minute'
-            ) gs
-        )
-        SELECT ts.time_bucket as timestamp, gd.count, COALESCE(gd.count, 0) as count
-        FROM time_series ts
-        LEFT JOIN grouped_data gd
-        ON ts.time_bucket = gd.time_bucket
-        ORDER BY ts.time_bucket
-    """
+                (CAST(strftime('%s', :start_date) AS integer) /(:grouping_minutes * 60)) *(:grouping_minutes * 60) AS time_bucket
+            UNION ALL
+            -- Recursive case: add grouping_minutes until we reach end_date
+            SELECT
+                time_bucket +(:grouping_minutes * 60)
+            FROM
+                time_series
+            WHERE
+                time_bucket < CAST(strftime('%s', :end_date) AS integer)
+                -- SQLite has a recursion limit of 1000 by default
+            LIMIT 10000)
+        -- Step 3: Join the time series with the grouped data
+        SELECT
+            datetime(ts.time_bucket, 'unixepoch') AS timestamp,
+            COALESCE(gd.count, 0) AS count
+        FROM
+            time_series ts
+            LEFT JOIN grouped_data gd ON ts.time_bucket = gd.time_bucket
+        ORDER BY
+            ts.time_bucket
+        """
+    
 
     with sqlite3.connect(SQLITE_DATABASE) as conn:
+        logger.debug(query)
         cursor = conn.cursor()
-        cursor.execute(query)
+        cursor.execute(query, {"grouping_minutes": grouping_minutes, "start_date": start_date, "end_date": end_date, "deviationid": deviationid})
         columns = [col[0].lower() for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 

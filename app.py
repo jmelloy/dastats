@@ -217,6 +217,13 @@ if __name__ == "__main__":
     t.daemon = True
     t.start()
 
-    logger.info("Starting app")
+    import argparse
 
-    app.run(port=8080, debug=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", "-p", type=int, default=4444)
+    
+    args = parser.parse_args()
+
+    logger.info(f"Starting app on port {args.port}")
+
+    app.run(port=args.port, debug=True)

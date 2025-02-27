@@ -145,12 +145,19 @@ def get_deviation_activity(deviationid, start_date, end_date):
         ORDER BY
             ts.time_bucket
         """
-    
 
     with sqlite3.connect(SQLITE_DATABASE) as conn:
         logger.debug(query)
         cursor = conn.cursor()
-        cursor.execute(query, {"grouping_minutes": grouping_minutes, "start_date": start_date, "end_date": end_date, "deviationid": deviationid})
+        cursor.execute(
+            query,
+            {
+                "grouping_minutes": grouping_minutes,
+                "start_date": start_date,
+                "end_date": end_date,
+                "deviationid": deviationid,
+            },
+        )
         columns = [col[0].lower() for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 

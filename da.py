@@ -209,7 +209,7 @@ class DeviantArt:
                 for item in results:
                     yield item
 
-                sleep_time = max(1, sleep_time / 2)
+                sleep_time = max(1, int(sleep_time * 0.75))
             except Exception as e:
                 logger.error(f"Error fetching whofaved for {deviation_id}: {e}")
                 if e.response.status_code == 429:

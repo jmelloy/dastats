@@ -19,7 +19,7 @@ import json
 
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+
 
 class Select:
     def __init__(self, model: Union["BaseModel", str], columns="*"):
@@ -447,6 +447,9 @@ class User(BaseModel):
     sidebar: Optional[Dict[str, Any]]
     session: Optional[Dict[str, Any]]
 
+    created_at: datetime = field(init=False, default_factory=datetime.now)
+    updated_at: datetime = field(init=False, default_factory=datetime.now)
+
     @classmethod
     def pk(self) -> str:
         return ["userid"]
@@ -491,6 +494,7 @@ class Deviation(BaseModel):
     created_at: datetime = field(init=False, default_factory=datetime.now)
     updated_at: datetime = field(init=False, default_factory=datetime.now)
 
+
 @dataclass
 class DeviationActivity(BaseModel):
     table_name = "deviation_activity"
@@ -506,7 +510,6 @@ class DeviationActivity(BaseModel):
 
     created_at: datetime = field(init=False, default_factory=datetime.now)
     updated_at: datetime = field(init=False, default_factory=datetime.now)
-
 
 
 @dataclass
@@ -545,6 +548,9 @@ class Collection(BaseModel):
     folderid: uuid.UUID = field(metadata={"primary_key": True})
     name: str
 
+    created_at: datetime = field(init=False, default_factory=datetime.now)
+    updated_at: datetime = field(init=False, default_factory=datetime.now)
+
 
 @dataclass
 class Gallery(BaseModel):
@@ -552,6 +558,9 @@ class Gallery(BaseModel):
 
     folderid: uuid.UUID = field(metadata={"primary_key": True})
     name: str
+
+    created_at: datetime = field(init=False, default_factory=datetime.now)
+    updated_at: datetime = field(init=False, default_factory=datetime.now)
 
 
 @dataclass

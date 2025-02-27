@@ -46,7 +46,7 @@ def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
         query = query.order_by(
             "cast(deviations.stats->'favourites' as int) desc, deviations.published_time"
         )
-    
+
     with sqlite3.connect(SQLITE_DATABASE) as conn:
         cursor = conn.cursor()
         cursor.execute(query.sql(limit=limit))
@@ -169,7 +169,7 @@ def get_publication_data(start_date, end_date, gallery="all"):
     FROM activity
     FULL OUTER JOIN deviationas ON activity.date = deviationas.date
     """
-    
+
     with sqlite3.connect(SQLITE_DATABASE) as conn:
         cursor = conn.cursor()
         cursor.execute(query)

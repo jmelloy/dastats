@@ -217,7 +217,6 @@ if __name__ == "__main__":
     # t.daemon = True
     # t.start()
 
-
     logger.info("Starting app")
 
     app.run(port=8080, debug=True)

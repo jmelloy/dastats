@@ -27,7 +27,6 @@ file_path = os.path.dirname(os.path.abspath(__file__))
 
 # Initialize Flask app
 app = Flask(__name__)
-da = DeviantArt()
 
 import logging
 
@@ -58,12 +57,8 @@ def populate_hourly():
 
 @app.route("/")
 def index():
-    global da
-
     if not os.path.exists(".credentials.json"):
         return render_template("credentials.html")
-
-    da = DeviantArt()
 
     logger.info("Credentials set")
 
@@ -124,7 +119,7 @@ def update_table():
     if end_date:
         end_date = datetime.fromisoformat(end_date)
 
-    table_data = top_by_activity(start_date, end_date, limit, gallery)
+    table_data = top_by_activity(da, start_date, end_date, limit, gallery)
 
     return jsonify({"status": "success", "data": table_data})
 
@@ -149,7 +144,7 @@ def get_sparkline_data():
     )
 
     if deviation_id and start_date and end_date:
-        sparkline_data = get_deviation_activity(deviation_id, start_date, end_date)
+        sparkline_data = get_deviation_activity(da, deviation_id, start_date, end_date)
         return jsonify({"status": "success", "data": sparkline_data})
 
     return jsonify({"status": "error", "message": "Invalid deviation ID"}), 400
@@ -176,14 +171,14 @@ def get_by_publication_date():
     return jsonify(
         {
             "status": "success",
-            "data": get_publication_data(start_date, end_date, gallery),
+            "data": get_publication_data(da, start_date, end_date, gallery),
         }
     )
 
 
 @app.route("/get-gallery-data")
 def gallery_data():
-    return jsonify({"status": "success", "data": get_gallery_data()})
+    return jsonify({"status": "success", "data": get_gallery_data(da)})
 
 
 @app.route("/get-users")
@@ -207,22 +202,27 @@ def get_users():
     return jsonify(
         {
             "status": "success",
-            "data": get_user_data(start_date, end_date, limit, gallery),
+            "data": get_user_data(da, start_date, end_date, limit, gallery),
         }
     )
 
 
 if __name__ == "__main__":
-    t = threading.Thread(target=populate_hourly)
-    t.daemon = True
-    t.start()
-
+    global da
     import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", "-p", type=int, default=4444)
-    
+    parser.add_argument("--sqlitedb", type=str, default=None)
+    parser.add_argument("--no-populate", action="store_true")
+
     args = parser.parse_args()
+    da = DeviantArt(args.sqlitedb)
+
+    if not args.no_populate:
+        t = threading.Thread(target=populate_hourly)
+        t.daemon = True
+        t.start()
 
     logger.info(f"Starting app on port {args.port}")
 

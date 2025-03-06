@@ -1,10 +1,12 @@
 import sqlite3
 from models import *
 from datetime import datetime, timedelta
-from da import SQLITE_DATABASE
+from da import DeviantArt
 
 
-def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
+def top_by_activity(
+    da: DeviantArt, start_time=None, end_time=None, limit=10, gallery="all"
+):
 
     # Connect to the database
     query = Select(
@@ -52,14 +54,14 @@ def top_by_activity(start_time=None, end_time=None, limit=10, gallery="all"):
             "cast(deviations.stats->'favourites' as int) desc, deviations.published_time"
         )
 
-    with sqlite3.connect(SQLITE_DATABASE) as conn:
+    with sqlite3.connect(da.sqlite_db) as conn:
         cursor = conn.cursor()
         cursor.execute(query.sql(limit=limit))
         columns = [col[0].lower() for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-def get_user_data(start_time, end_time, limit=10, gallery="all"):
+def get_user_data(da: DeviantArt, start_time, end_time, limit=10, gallery="all"):
 
     # Connect to the database
     query = (
@@ -80,7 +82,7 @@ def get_user_data(start_time, end_time, limit=10, gallery="all"):
     if end_time:
         query = query.where(f"timestamp <= '{end_time}'")
 
-    with sqlite3.connect(SQLITE_DATABASE) as conn:
+    with sqlite3.connect(da.sqlite_db) as conn:
         cursor = conn.cursor()
         cursor.execute(query.sql(limit=limit))
         columns = [col[0].lower() for col in cursor.description]
@@ -105,7 +107,7 @@ def calculate_grouping_minutes(start_date, end_date, max_groups=100):
         return 60 * 24
 
 
-def get_deviation_activity(deviationid, start_date, end_date):
+def get_deviation_activity(da: DeviantArt, deviationid, start_date, end_date):
     grouping_minutes = calculate_grouping_minutes(start_date, end_date)
     query = f"""
         WITH grouped_data AS (
@@ -146,7 +148,7 @@ def get_deviation_activity(deviationid, start_date, end_date):
             ts.time_bucket
         """
 
-    with sqlite3.connect(SQLITE_DATABASE) as conn:
+    with sqlite3.connect(da.sqlite_db) as conn:
         logger.debug(query)
         cursor = conn.cursor()
         cursor.execute(
@@ -162,7 +164,7 @@ def get_deviation_activity(deviationid, start_date, end_date):
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-def get_publication_data(start_date, end_date, gallery="all"):
+def get_publication_data(da: DeviantArt, start_date, end_date, gallery="all"):
     if gallery == "all":
         gallery = None
 
@@ -198,14 +200,14 @@ def get_publication_data(start_date, end_date, gallery="all"):
     FULL OUTER JOIN deviationas ON activity.date = deviationas.date
     """
 
-    with sqlite3.connect(SQLITE_DATABASE) as conn:
+    with sqlite3.connect(da.sqlite_db) as conn:
         cursor = conn.cursor()
         cursor.execute(query)
         columns = [col[0].lower() for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-def get_gallery_data():
+def get_gallery_data(da: DeviantArt):
     query = """
         SELECT folderid, name || ' (' || count(*) || ')' as name
         FROM galleries, deviation_metadata, json_each(deviation_metadata.galleries) as gallery
@@ -213,7 +215,7 @@ def get_gallery_data():
         GROUP BY folderid, name
         ORDER BY count(*) DESC
     """
-    with sqlite3.connect(SQLITE_DATABASE) as conn:
+    with sqlite3.connect(da.sqlite_db) as conn:
         logger.debug(query)
         cursor = conn.cursor()
         cursor.execute(query)

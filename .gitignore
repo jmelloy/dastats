@@ -166,5 +166,6 @@ deviantart_data.db
 deviantart_data.db.wal
 thumbs/*
 
-deviantart_data.sqlite
-deviantart_data.sqlite.journal
+*.sqlite
+*.sqlite.wal
+*.sqlite.journal

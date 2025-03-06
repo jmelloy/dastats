@@ -32,8 +32,6 @@ AUTHORIZATION_BASE_URL = "https://www.deviantart.com/oauth2/authorize"
 TOKEN_URL = "https://www.deviantart.com/oauth2/token"
 REDIRECT_URI = "http://localhost:8080/callback"
 
-SQLITE_DATABASE = os.path.join(file_path, "deviantart_data.sqlite")
-
 
 def raise_for_status(response):
     try:
@@ -46,12 +44,17 @@ def raise_for_status(response):
 
 
 class DeviantArt:
-    def __init__(self):
+    def __init__(self, sqlitedb=None):
         self.access_token = ""
         self.refresh_token = ""
         self.expires = 0
         self.client_id = None
         self.client_secret = None
+
+        if sqlitedb:
+            self.sqlite_db = sqlitedb
+        else:
+            self.sqlite_db = os.path.join(file_path, "deviantart_data.sqlite")
 
         if os.path.exists(".credentials.json"):
             with open(".credentials.json", "r") as F:
@@ -158,7 +161,7 @@ class DeviantArt:
 
         return token_response.json()
 
-    def _get_deviations(self, offset=0, limit=24, gallery="all"):
+    def _get_deviations(self, offset=0, limit=24, gallery="all", username=None):
         url = f"{API_BASE_URL}/gallery/{gallery}"
         params = {
             "access_token": self.access_token,
@@ -166,16 +169,20 @@ class DeviantArt:
             "limit": limit,
             "mature_content": True,
         }
+        if username:
+            params["username"] = username
         response = raise_for_status(requests.get(url, params=params))
 
         return response.json()
 
-    def get_all_deviations(self, gallery="all", offset=0):
+    def get_all_deviations(self, gallery="all", offset=0, username=None):
         limit = 24
         has_more = True
         while has_more:
             logger.info(f"Fetching gallery {gallery}: offset={offset}, limit={limit}")
-            data = self._get_deviations(offset, limit, gallery=gallery)
+            data = self._get_deviations(
+                offset, limit, gallery=gallery, username=username
+            )
             results = data.get("results", [])
             has_more = data.get("has_more", False)
             offset = data.get("next_offset", 0)
@@ -274,8 +281,14 @@ class DeviantArt:
         ).json()
 
 
-def populate_gallery(da: DeviantArt, db: sqlite3.Connection, gallery="all", offset=0):
-    for i, item in enumerate(da.get_all_deviations(gallery=gallery, offset=offset)):
+def populate_gallery(
+    da: DeviantArt, db: sqlite3.Connection, gallery="all", username=None, full=False
+):
+    offset = 0
+    # These are ordered newest first
+    for i, item in enumerate(
+        da.get_all_deviations(gallery=gallery, offset=offset, username=username)
+    ):
         logger.debug(item)
         author = item.author
         if author:
@@ -294,8 +307,16 @@ def populate_gallery(da: DeviantArt, db: sqlite3.Connection, gallery="all", offs
                             F.write(res.content)
                         break
 
+        q = Select(Deviation).where(f"deviations.deviationid == '{item.deviationid}'")
+        rs = db.execute(q.sql())
+        if rs.fetchone():
+            logger.debug(f"Deviation {item.deviationid} already exists")
+            if not full:
+                break
+
         item.insert(db, conflict_mode="replace")
-        if i % 100 == 0:
+
+        if i % 24 == 0:
             db.commit()
 
 
@@ -397,9 +418,11 @@ def populate_favorites(da: DeviantArt, db: sqlite3.Connection):
         time.sleep(1)
 
 
-def populate(da: DeviantArt, full=False):
+def populate(da: DeviantArt, full=False, username=None):
+
     da.check_token()
-    with sqlite3.connect(SQLITE_DATABASE) as db:
+
+    with sqlite3.connect(da.sqlite_db) as db:
         for table in [
             User,
             Deviation,
@@ -408,7 +431,7 @@ def populate(da: DeviantArt, full=False):
             Collection,
             Gallery,
         ]:
-            existing = get_table_info(SQLITE_DATABASE, table.table_name)
+            existing = get_table_info(da.sqlite_db, table.table_name)
             if not existing["columns"]:
                 logging.info(table.create_table_sql())
                 db.execute(table.create_table_sql())
@@ -424,10 +447,7 @@ def populate(da: DeviantArt, full=False):
                 logging.info(stmt)
                 db.execute(stmt)
 
-        deviations = db.execute("select count(*) from deviations").fetchone()[0]
-        logger.info(f"Deviations: {deviations}")
-
-        populate_gallery(da, db, gallery="all", offset=deviations if not full else 0)
+        populate_gallery(da, db, gallery="all", username=username, full=full)
         db.commit()
 
         populate_metadata(da, db)
@@ -443,7 +463,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug", action="store_true")
-
+    parser.add_argument("--username", type=str, default=None)
     parser.add_argument("--full", action="store_true")
     args = parser.parse_args()
 
@@ -451,19 +471,23 @@ if __name__ == "__main__":
         level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+    if args.username:
+        da = DeviantArt(sqlitedb=os.path.join(file_path, f"{args.username}.sqlite"))
+    else:
+        da = DeviantArt()
 
-    da = DeviantArt()
     da.check_token()
 
-    populate(da, args.full)
+    populate(da, args.full, args.username)
 
     print("Data collection completed.")
 
-    with sqlite3.connect(SQLITE_DATABASE) as db:
-        df = db.execute(
-            """SELECT title, stats.favourites, stats.comments, url
-            FROM deviations order by stats.favourites + stats.comments desc limit 15"""
-        ).fetch_df()
+    with sqlite3.connect(da.sqlite_db) as db:
+        rs = db.execute(
+            """SELECT title, stats->'favourites', stats->'comments', url
+            FROM deviations order by cast(stats->'favourites' as int) + cast(stats->'comments' as int) desc limit 15"""
+        ).fetchall()
+        from tabulate import tabulate
 
-        with pd.option_context("display.max_colwidth", None):
-            print(df)
+        headers = ["Title", "Favorites", "Comments", "URL"]
+        print("\n" + tabulate(rs, headers=headers, tablefmt="grid"))

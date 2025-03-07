@@ -226,6 +226,8 @@ class DeviantArt:
                 else:
                     raise e
 
+    
+
     def get_metadata(self, deviation_ids: list) -> Iterator[DeviationMetadata]:
         batch_size = 10
         sleep_time = 1
@@ -284,12 +286,14 @@ class DeviantArt:
 def populate_gallery(
     da: DeviantArt, db: sqlite3.Connection, gallery="all", username=None, full=False
 ):
+    deviation_ids = []
     offset = 0
     # These are ordered newest first
     for i, item in enumerate(
         da.get_all_deviations(gallery=gallery, offset=offset, username=username)
     ):
         logger.debug(item)
+        deviation_ids.append(item.deviationid)
         author = item.author
         if author:
             r = author.insert(db, conflict_mode="replace")
@@ -318,6 +322,14 @@ def populate_gallery(
 
         if i % 24 == 0:
             db.commit()
+
+    db.commit()
+
+    if full and deviation_ids:
+        q = f"""update deviations set is_deleted = true, updated_at = datetime('now') where deviationid not in ('{"','".join(deviation_ids)}')"""
+        logger.info(q)
+        db.execute(q)
+        db.commit()
 
 
 def populate_metadata(da: DeviantArt, db: sqlite3.Connection):
@@ -381,6 +393,9 @@ def populate_favorites(da: DeviantArt, db: sqlite3.Connection):
             ],
         )
         .join(DeviationActivity, on="deviationid", how="left")
+        .where(
+            f"action = 'fave'"
+        )
         .group_by("1,2")
         .having(
             f"cast(stats->'favourites' as integer) <> count({DeviationActivity.table_name}.deviationid)"
@@ -391,7 +406,7 @@ def populate_favorites(da: DeviantArt, db: sqlite3.Connection):
 
     for deviation_id, fav, count in rows:
         logger.info(
-            f"Fetching /whofaved for deviation: {deviation_id} ({fav} / {count})"
+            f"Fetching /whofaved for {deviation_id=}: ({count=}, {fav=})"
         )
         if count > fav:
             db.execute(
@@ -477,7 +492,7 @@ if __name__ == "__main__":
         da = DeviantArt()
 
     da.check_token()
-
+    
     populate(da, args.full, args.username)
 
     print("Data collection completed.")

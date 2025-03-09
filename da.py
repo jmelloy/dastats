@@ -226,8 +226,6 @@ class DeviantArt:
                 else:
                     raise e
 
-    
-
     def get_metadata(self, deviation_ids: list) -> Iterator[DeviationMetadata]:
         batch_size = 10
         sleep_time = 1
@@ -393,9 +391,7 @@ def populate_favorites(da: DeviantArt, db: sqlite3.Connection):
             ],
         )
         .join(DeviationActivity, on="deviationid", how="left")
-        .where(
-            f"action = 'fave'"
-        )
+        .where(f"action = 'fave'")
         .group_by("1,2")
         .having(
             f"cast(stats->'favourites' as integer) <> count({DeviationActivity.table_name}.deviationid)"
@@ -405,9 +401,7 @@ def populate_favorites(da: DeviantArt, db: sqlite3.Connection):
     rows = db.execute(select.sql()).fetchall()
 
     for deviation_id, fav, count in rows:
-        logger.info(
-            f"Fetching /whofaved for {deviation_id=}: ({count=}, {fav=})"
-        )
+        logger.info(f"Fetching /whofaved for {deviation_id=}: ({count=}, {fav=})")
         if count > fav:
             db.execute(
                 f"DELETE FROM {DeviationActivity.table_name} WHERE deviationid = ?",
@@ -492,7 +486,7 @@ if __name__ == "__main__":
         da = DeviantArt()
 
     da.check_token()
-    
+
     populate(da, args.full, args.username)
 
     print("Data collection completed.")

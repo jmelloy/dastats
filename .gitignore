@@ -168,4 +168,4 @@ thumbs/*
 
 *.sqlite
 *.sqlite.wal
-*.sqlite.journal
+*.sqlite-journal

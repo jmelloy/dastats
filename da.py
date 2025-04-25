@@ -168,6 +168,7 @@ class DeviantArt:
             "offset": offset,
             "limit": limit,
             "mature_content": True,
+            "with_session": True,
         }
         if username:
             params["username"] = username

@@ -174,8 +174,8 @@ def get_publication_data(da: DeviantArt, start_date, end_date, gallery="all"):
         end_date = datetime.now()
 
     if gallery:
-        gallery_join = f"join deviation_metadata using (deviationid), unnest(deviation_metadata.galleries)"
-        gallery_where = f"unnest.folderid = '{gallery}'"
+        gallery_join = f"join deviation_metadata using (deviationid), json_each(deviation_metadata.galleries) as gallery"
+        gallery_where = f"gallery.value->>'folderid' = '{gallery}'"
 
     query = f"""
     with deviationas as (
@@ -199,7 +199,7 @@ def get_publication_data(da: DeviantArt, start_date, end_date, gallery="all"):
     FROM activity
     FULL OUTER JOIN deviationas ON activity.date = deviationas.date
     """
-
+    print(query)
     with sqlite3.connect(da.sqlite_db) as conn:
         cursor = conn.cursor()
         cursor.execute(query)
@@ -217,6 +217,45 @@ def get_gallery_data(da: DeviantArt):
     """
     with sqlite3.connect(da.sqlite_db) as conn:
         logger.debug(query)
+        cursor = conn.cursor()
+        cursor.execute(query)
+        columns = [col[0].lower() for col in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+def get_deviation_data(da: DeviantArt, tags=None, gallery=None, limit=100, offset=0):
+    """Get deviations filtered by tags and galleries.
+    
+    Args:
+        da: DeviantArt instance
+        tags: List of tags to filter by
+        galleries: List of gallery folder IDs to filter by
+        limit: Maximum number of results to return
+    """
+    if gallery == "all":
+        gallery = None
+
+    query = """
+        SELECT DISTINCT d.*, json_group_array(json_object('folderid', g.folderid, 'name', g.name)) as galleries
+        FROM deviations d
+        LEFT JOIN deviation_metadata dm USING (deviationid)
+        LEFT JOIN json_each(dm.galleries) gallery_json
+        LEFT JOIN galleries g ON g.folderid = gallery_json.value->>'folderid'
+    """
+    
+    where_clauses = ["d.is_deleted = 0"]
+    if tags:
+        tags_list = [f"'%{tag}%'" for tag in tags]
+        where_clauses.append(f"dm.tags LIKE ANY ({','.join(tags_list)})")
+        
+    if gallery:
+        where_clauses.append(f"g.folderid = '{gallery}'")
+        
+    if where_clauses:
+        query += f" WHERE {' AND '.join(where_clauses)}"
+        
+    query += f" GROUP BY d.deviationid order by d.published_time desc LIMIT {limit} OFFSET {offset}"
+    
+    with sqlite3.connect(da.sqlite_db) as conn:
         cursor = conn.cursor()
         cursor.execute(query)
         columns = [col[0].lower() for col in cursor.description]

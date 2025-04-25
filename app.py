@@ -18,6 +18,7 @@ from sql import (
     get_publication_data,
     get_gallery_data,
     get_user_data,
+    get_deviation_data,
 )
 
 import multiprocessing
@@ -68,6 +69,9 @@ def index():
 
     return redirect("/stats/")
 
+@app.route("/deviations")
+def deviations():
+    return render_template("deviations.html")
 
 # OAuth configuration
 @app.route("/login", methods=["POST"])
@@ -176,10 +180,24 @@ def get_by_publication_date():
     )
 
 
-@app.route("/get-gallery-data")
+@app.route("/get-gallery-names")
 def gallery_data():
     return jsonify({"status": "success", "data": get_gallery_data(da)})
 
+
+@app.route("/get-deviations")
+def get_deviations():
+    tags = request.args.get("tags")
+    gallery = request.args.get("gallery")
+    limit = request.args.get("limit", 100)
+    offset = request.args.get("offset", 0)
+
+    return jsonify(
+        {
+            "status": "success",
+            "data": get_deviation_data(da, tags, gallery, limit, offset),
+        }
+    )
 
 @app.route("/get-users")
 def get_users():

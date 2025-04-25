@@ -38,7 +38,7 @@
               <option value="all">All Galleries</option>
             </select>
             <script>
-              fetch('/get-gallery-data')
+              fetch('/get-gallery-names')
                 .then(response => response.json())
                 .then(data => {
                   const select = document.getElementById('gallerySelect');

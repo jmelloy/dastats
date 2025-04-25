@@ -5,6 +5,24 @@ import imagehash
 from collections import defaultdict
 from da import DeviantArt
 
+def get_hashes(folder_path):
+    """
+    Get the hashes of all images in a folder.
+    """
+    hash_dict = defaultdict(list)
+
+    for root, dirs, files in os.walk(folder_path):
+        for filename in files:
+            if filename.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp")):
+                filepath = os.path.join(root, filename)
+                try:
+                    with Image.open(filepath) as img:
+                        hash = imagehash.average_hash(img)
+                        hash_dict[hash].append(filepath)
+                except Exception as e:
+                    print(f"Error processing {filepath}: {e}")
+
+    return hash_dict
 
 def find_duplicate_images(folder_path):
     """
@@ -34,36 +52,56 @@ def find_duplicate_images(folder_path):
 
 def main():
     import sys
+    import argparse
 
-    if len(sys.argv) < 2:
-        print("Usage: python duplicates.py <folder_path> [sqlitedb]")
-        sys.exit(1)
-    folder = sys.argv[1]
-    if len(sys.argv) > 2:
-        sqlitedb = sys.argv[2]
-    else:
-        sqlitedb = "deviantart_data.sqlite"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("folder", type=str, help="Path to folder to scan for duplicates", nargs="+")
+    parser.add_argument("--sqlitedb", type=str, help="Path to SQLite database", default="deviantart_data.sqlite")
+    
+    args = parser.parse_args()
 
-    print("Scanning for duplicates...")
-    duplicates = find_duplicate_images(folder)
-
+    duplicates = []
+    hashes = {}
+    for folder in args.folder:
+        print(f"Scanning for duplicates in {folder}...")
+        new_hashes = get_hashes(folder)
+        for hash, filepaths in new_hashes.items():
+            if hash in hashes:
+                duplicates.append((hash, hashes[hash] + filepaths))
+            
+            for h in hashes:
+                if abs(hash - h) < 3:
+                    duplicates.append((hash, hashes[h] + filepaths))
+            
+            hashes[hash] = filepaths
+    
+    
     if not duplicates:
         print("No duplicate images found.")
         return
 
-    conn = sqlite3.connect(sqlitedb)
+    conn = sqlite3.connect(args.sqlitedb)
     cursor = conn.cursor()
 
     print(f"\nFound {len(duplicates)} duplicate images:")
-    for hash_value, filepaths in duplicates.items():
+    for hash_value, filepaths in duplicates:
         print(f"\nDuplicate set (hash: {hash_value}):")
         for filepath in filepaths:
             uuid = os.path.basename(filepath).split(".")[0]
             cursor.execute("SELECT * FROM deviations WHERE deviationid = ?", (uuid,))
             cols = [desc[0] for desc in cursor.description]
             rec = cursor.fetchone()
+            if rec is None:
+                print(f"  {filepath} --> Not found in database")
+                continue
             dev = {cols[i]: rec[i] for i in range(len(cols))}
-            print(f"  {filepath} --> {dev['url']}")
+            print(f"  {filepath} --> {dev['url']} ({dev['is_deleted']})")
+
+
+        # for filepath in filepaths[1:]:
+        #     print(f"  {filepath} --> Deleting")
+        #     if os.path.exists(filepath):
+        #         os.remove(filepath)
 
     conn.close()
 

@@ -282,10 +282,15 @@ class DeviantArt:
 
 
 def populate_gallery(
-    da: DeviantArt, db: sqlite3.Connection, gallery="all", username=None, full=False
+    da: DeviantArt,
+    db: sqlite3.Connection,
+    gallery="all",
+    username=None,
+    full=False,
+    offset=0,
 ):
     deviation_ids = []
-    offset = 0
+ 
     # These are ordered newest first
     for i, item in enumerate(
         da.get_all_deviations(gallery=gallery, offset=offset, username=username)
@@ -427,7 +432,7 @@ def populate_favorites(da: DeviantArt, db: sqlite3.Connection):
         time.sleep(1)
 
 
-def populate(da: DeviantArt, full=False, username=None):
+def populate(da: DeviantArt, full=False, username=None, offset=0):
 
     da.check_token()
 
@@ -456,7 +461,7 @@ def populate(da: DeviantArt, full=False, username=None):
                 logging.info(stmt)
                 db.execute(stmt)
 
-        populate_gallery(da, db, gallery="all", username=username, full=full)
+        populate_gallery(da, db, gallery="all", username=username, full=full, offset=offset)
         db.commit()
 
         populate_metadata(da, db)
@@ -474,6 +479,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--username", type=str, default=None)
     parser.add_argument("--full", action="store_true")
+    parser.add_argument("--skip", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(

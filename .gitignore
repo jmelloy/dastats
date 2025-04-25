@@ -169,3 +169,5 @@ thumbs/*
 *.sqlite
 *.sqlite.wal
 *.sqlite-journal
+scripts/output/*
+scripts/mage_raw.txt

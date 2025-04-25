@@ -6,3 +6,4 @@ Flask
 tabulate
 Pillow
 imagehash
+pandas

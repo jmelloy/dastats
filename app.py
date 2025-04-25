@@ -24,11 +24,6 @@ from sql import (
 import multiprocessing
 import time
 
-file_path = os.path.dirname(os.path.abspath(__file__))
-
-# Initialize Flask app
-app = Flask(__name__)
-
 import logging
 
 logger = logging.getLogger(__name__)
@@ -37,6 +32,12 @@ logger.setLevel(logging.INFO)
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+file_path = os.path.dirname(os.path.abspath(__file__))
+
+# Initialize Flask app
+app = Flask(__name__, static_url_path='/static', static_folder='static')
+
 
 p = None
 

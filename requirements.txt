@@ -7,3 +7,5 @@ tabulate
 Pillow
 imagehash
 pandas
+celery
+redis

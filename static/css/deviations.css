@@ -1,0 +1,59 @@
+/* Grid container styles */
+#deviations-container {
+  display: grid;
+  grid-auto-rows: auto;
+  align-items: start;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-gap: 10px;
+  justify-items: center;
+}
+
+/* Deviation item styles */
+.deviation {
+  width: 150px;
+  margin: 5px;
+  position: relative;
+  transition: transform 0.2s;
+}
+
+.deviation:hover {
+  transform: scale(1.02);
+}
+
+/* Deviation image styles */
+.deviation img {
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+/* Deviation info styles */
+.deviation-info {
+  padding: 8px;
+  font-size: 0.8em;
+  color: #666;
+}
+
+/* Stats container styles */
+.deviation-info div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Icon styles */
+.deviation-info span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Select dropdown styles */
+.form-select {
+  min-width: 200px;
+}
+
+/* Date input styles */
+.form-control[type="text"] {
+  min-width: 150px;
+} 

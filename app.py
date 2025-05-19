@@ -36,7 +36,7 @@ logging.basicConfig(
 file_path = os.path.dirname(os.path.abspath(__file__))
 
 # Initialize Flask app
-app = Flask(__name__, static_url_path='/static', static_folder='static')
+app = Flask(__name__, static_url_path="/static", static_folder="static")
 
 
 p = None
@@ -70,9 +70,11 @@ def index():
 
     return redirect("/stats/")
 
+
 @app.route("/deviations")
 def deviations():
     return render_template("deviations.html")
+
 
 # OAuth configuration
 @app.route("/login", methods=["POST"])
@@ -199,6 +201,7 @@ def get_deviations():
             "data": get_deviation_data(da, tags, gallery, limit, offset),
         }
     )
+
 
 @app.route("/get-users")
 def get_users():

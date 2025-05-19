@@ -271,13 +271,16 @@ class BaseModel:
         conn: sqlite3.Connection,
         *,
         conflict_mode: Literal["ignore", "replace"] = None,
-    ) -> str:
+        allow_nulls: List[str] = None,
+    ) -> sqlite3.Cursor:
+        if allow_nulls is None:
+            allow_nulls = []
 
         # Convert any BaseModel values to their JSON representation
         non_null_cols = {
             col: convert_type(value)
             for col, value in self.to_dict().items()
-            if value is not None
+            if value is not None or col in allow_nulls
         }
 
         non_null_cols["created_at"] = datetime.now().isoformat()
@@ -590,3 +593,35 @@ class DeviationMetadata(BaseModel):
 
     created_at: datetime = field(init=False, default_factory=datetime.now)
     updated_at: datetime = field(init=False, default_factory=datetime.now)
+
+
+@dataclass
+class Message(BaseModel):
+    table_name = "messages"
+
+    messageid: uuid.UUID = field(metadata={"primary_key": True})
+    type: str
+    orphaned: bool
+    ts: Optional[datetime]
+    stackid: Optional[str]
+    stack_count: Optional[int]
+    is_new: bool
+    originator: Optional[User]
+    subject: Optional[Dict[str, Any]]
+    profile: Optional[User]
+    deviation: Optional[Deviation]
+    status: Optional[Dict[str, Any]]
+    comment: Optional[Dict[str, Any]]
+    collection: Optional[Collection]
+    gallery: Optional[Gallery]
+    html: Optional[str]
+
+    created_at: datetime = field(init=False, default_factory=datetime.now)
+    updated_at: datetime = field(init=False, default_factory=datetime.now)
+
+    deviationid: Optional[uuid.UUID] = field(metadata={"foreign_key": Deviation})
+
+    def __post_init__(self):
+        self.deviationid = (self.subject.get("deviation", {}).get("deviationid")) or (
+            self.deviation and self.deviation.deviationid
+        )

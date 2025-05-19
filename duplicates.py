@@ -5,6 +5,7 @@ import imagehash
 from collections import defaultdict
 from da import DeviantArt
 
+
 def get_hashes(folder_path):
     """
     Get the hashes of all images in a folder.
@@ -23,6 +24,7 @@ def get_hashes(folder_path):
                     print(f"Error processing {filepath}: {e}")
 
     return hash_dict
+
 
 def find_duplicate_images(folder_path):
     """
@@ -55,9 +57,16 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("folder", type=str, help="Path to folder to scan for duplicates", nargs="+")
-    parser.add_argument("--sqlitedb", type=str, help="Path to SQLite database", default="deviantart_data.sqlite")
-    
+    parser.add_argument(
+        "folder", type=str, help="Path to folder to scan for duplicates", nargs="+"
+    )
+    parser.add_argument(
+        "--sqlitedb",
+        type=str,
+        help="Path to SQLite database",
+        default="deviantart_data.sqlite",
+    )
+
     args = parser.parse_args()
 
     duplicates = []
@@ -68,14 +77,13 @@ def main():
         for hash, filepaths in new_hashes.items():
             if hash in hashes:
                 duplicates.append((hash, hashes[hash] + filepaths))
-            
+
             for h in hashes:
                 if abs(hash - h) < 3:
                     duplicates.append((hash, hashes[h] + filepaths))
-            
+
             hashes[hash] = filepaths
-    
-    
+
     if not duplicates:
         print("No duplicate images found.")
         return
@@ -96,7 +104,6 @@ def main():
                 continue
             dev = {cols[i]: rec[i] for i in range(len(cols))}
             print(f"  {filepath} --> {dev['url']} ({dev['is_deleted']})")
-
 
         # for filepath in filepaths[1:]:
         #     print(f"  {filepath} --> Deleting")

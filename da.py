@@ -15,6 +15,7 @@ from models import (
     User,
     Collection,
     Gallery,
+    Message,
 )
 from utils import get_table_info, generate_alter_statements, create_temp_db_from_sql
 
@@ -30,7 +31,7 @@ METADATA_ENDPOINT = "/deviation/metadata"
 
 AUTHORIZATION_BASE_URL = "https://www.deviantart.com/oauth2/authorize"
 TOKEN_URL = "https://www.deviantart.com/oauth2/token"
-REDIRECT_URI = "http://localhost:8080/callback"
+REDIRECT_URI = "http://localhost:4444/callback"
 
 
 def raise_for_status(response):
@@ -70,10 +71,9 @@ class DeviantArt:
                 self.expires = data.get("expires_at", 0)
 
     def authorization_url(self):
-        logger.info(
-            f"Authorization URL: {AUTHORIZATION_BASE_URL}?client_id={self.client_id}&redirect_uri={REDIRECT_URI}&response_type=code&scope=browse"
-        )
-        return f"{AUTHORIZATION_BASE_URL}?client_id={self.client_id}&redirect_uri={REDIRECT_URI}&response_type=code&scope=browse"
+        url = f"{AUTHORIZATION_BASE_URL}?client_id={self.client_id}&redirect_uri={REDIRECT_URI}&response_type=code&scope=browse message publish stash"
+        logger.info(f"Authorization URL: {url}")
+        return url
 
     def check_token(self):
         if not self.access_token:
@@ -271,6 +271,73 @@ class DeviantArt:
 
             time.sleep(sleep_time)
 
+    def get_user_info(self, username):
+        url = f"{API_BASE_URL}/user/{username}"
+        params = {
+            "access_token": self.access_token,
+        }
+        response = raise_for_status(requests.get(url, params=params))
+        return response.json()
+
+    def _get_feed_stack(self, stackid, offset=0):
+        url = f"{API_BASE_URL}/messages/feedback/{stackid}"
+        params = {
+            "access_token": self.access_token,
+            "with_session": True,
+            "limit": 50,
+            "offset": offset,
+            "mature_content": True,
+        }
+        response = raise_for_status(requests.get(url, params=params))
+        return response.json()
+
+    def _get_feed(self, cursor=None):
+
+        url = f"{API_BASE_URL}/messages/feed"
+        params = {
+            "access_token": self.access_token,
+            "with_session": True,
+            "mature_content": True,
+        }
+
+        if cursor:
+            params["cursor"] = cursor
+
+        logger.info(f"Fetching feed with {cursor=}")
+
+        response = raise_for_status(requests.get(url, params=params))
+        return response.json()
+
+    def get_feed(self):
+        has_more = True
+        cursor = None
+
+        while has_more:
+            time.sleep(3)
+            data = self._get_feed(cursor)
+            results = data.pop("results")
+
+            logger.info(f"Feed data: {data}")
+            for item in results:
+                yield Message.from_json(item)
+
+            cursor = data.get("cursor", None)
+            has_more = data.get("has_more", False)
+
+    def get_feed_stack(self, stackid):
+        has_more = True
+        offset = 0
+        while has_more:
+            time.sleep(1)
+            logger.info(f"Fetching feed stack {stackid}: {offset=}")
+            data = self._get_feed_stack(stackid, offset)
+            results = data.pop("results")
+            for item in results:
+                yield Message.from_json(item)
+
+            has_more = data.get("has_more", False)
+            offset = data.get("next_offset", 0)
+
     def whoami(self):
         return raise_for_status(
             requests.get(
@@ -282,6 +349,80 @@ class DeviantArt:
         ).json()
 
 
+def populate_feed(da: DeviantArt, db: sqlite3.Connection):
+    stacks = set()
+
+    query = Select(Message, ["messageid"]).where(f"messageid is not null")
+    rows = db.execute(query.sql()).fetchall()
+    messages = {row[0] for row in rows}
+
+    inserted = 0
+    for item in da.get_feed():
+        logger.debug(item)
+
+        if item.stackid and item.stack_count > 1:
+            stacks.add(item.stackid)
+            item.timestamp = None
+
+        item.deviationid = (item.deviation and item.deviation.deviationid) or (
+            item.subject and item.subject.get("deviation", {}).get("deviationid")
+        )
+
+        item.insert(db, conflict_mode="replace")
+        item.originator.insert(db, conflict_mode="replace")
+
+        inserted += 1
+
+        if item.messageid in messages:
+            logger.info(
+                f"Stopping feed collection because message {item.messageid} already exists"
+            )
+            break
+
+    logger.info(f"Processed {inserted} stacks")
+
+
+def populate_feed_stacks(da: DeviantArt, db: sqlite3.Connection):
+    query = (
+        Select(Message, ["stackid", "deviationid", "stack_count", "count(*)"])
+        .where(f"stackid is not null and stack_count > 1")
+        .group_by("stackid", "deviationid", "stack_count")
+        .having(f"count(*) <> stack_count")
+    )
+    logger.info(query.sql())
+
+    rows = db.execute(
+        Select(Message, ["messageid"]).where(f"stackid is null").sql()
+    ).fetchall()
+    messages = {row[0] for row in rows}
+
+    rows = db.execute(query.sql()).fetchall()
+    for stack, deviationid, stack_count, count in rows:
+        logger.info(f"Processing stack {stack}: {deviationid=} {stack_count=} {count=}")
+        inserted = 0
+        for item in da.get_feed_stack(stack):
+
+            logger.debug(item)
+            item.deviationid = (item.deviation and item.deviation.deviationid) or (
+                item.subject and item.subject.get("deviation", {}).get("deviationid")
+            )
+
+            item.insert(
+                db, conflict_mode="replace", allow_nulls=["stackid", "stack_count"]
+            )
+
+            item.originator.insert(db, conflict_mode="replace")
+
+            if item.messageid in messages:
+                logger.info(f"Message {item.messageid} already exists")
+                break
+
+            inserted += 1
+
+        logger.info(f"Inserted {inserted} messages for stack {stack}")
+        db.commit()
+
+
 def populate_gallery(
     da: DeviantArt,
     db: sqlite3.Connection,
@@ -291,7 +432,7 @@ def populate_gallery(
     offset=0,
 ):
     deviation_ids = []
- 
+
     # These are ordered newest first
     for i, item in enumerate(
         da.get_all_deviations(gallery=gallery, offset=offset, username=username)
@@ -344,12 +485,12 @@ def populate_metadata(da: DeviantArt, db: sqlite3.Connection):
         )
         .join(DeviationMetadata, on="deviationid", how="left")
         .where(
-            "deviation_metadata.deviationid is null or deviation_metadata.updated_at < datetime('now', '-6 hours')"
+            "deviation_metadata.deviationid is null or mod(deviation_metadata.rowid, 24) = :mod"
         )
     )
     print(select.sql())
 
-    rs = db.execute(select.sql())
+    rs = db.execute(select.sql(), {"mod": datetime.now().hour})
     rows = rs.fetchall()
     logger.info(f"Fetching metadata for {len(rows)} deviations")
 
@@ -445,6 +586,7 @@ def populate(da: DeviantArt, full=False, username=None, offset=0):
             DeviationActivity,
             Collection,
             Gallery,
+            Message,
         ]:
             existing = get_table_info(da.sqlite_db, table.table_name)
             if not existing["columns"]:
@@ -462,13 +604,21 @@ def populate(da: DeviantArt, full=False, username=None, offset=0):
                 logging.info(stmt)
                 db.execute(stmt)
 
-        populate_gallery(da, db, gallery="all", username=username, full=full, offset=offset)
+        populate_gallery(
+            da, db, gallery="all", username=username, full=full, offset=offset
+        )
         db.commit()
 
         populate_metadata(da, db)
         db.commit()
 
-        populate_favorites(da, db)
+        # populate_favorites(da, db)
+        # db.commit()
+
+        populate_feed(da, db)
+        db.commit()
+
+        populate_feed_stacks(da, db)
         db.commit()
 
 
@@ -500,9 +650,12 @@ if __name__ == "__main__":
 
     with sqlite3.connect(da.sqlite_db) as db:
         rs = db.execute(
-            """SELECT title, stats->'favourites', stats->'comments', url
-            FROM deviations order by cast(stats->'favourites' as int) + cast(stats->'comments' as int) desc limit 15"""
-        ).fetchall()
+            """SELECT title, count(*) filter(where type='feedback.favourite' or type='feedback.collect'), count(*) filter(where type='feedback.comment'), url
+            FROM deviations 
+            join messages on deviations.deviationid = messages.deviationid
+            group by title, url
+            order by count(*) desc limit 15"""
+        )
         from tabulate import tabulate
 
         headers = ["Title", "Favorites", "Comments", "URL"]

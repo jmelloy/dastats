@@ -111,14 +111,13 @@ def get_deviation_activity(da: DeviantArt, deviationid, start_date, end_date):
     grouping_minutes = calculate_grouping_minutes(start_date, end_date)
     query = f"""
         WITH grouped_data AS (
-            SELECT
-                (CAST(strftime('%s', timestamp) AS integer) /(:grouping_minutes * 60)) *(:grouping_minutes * 60) AS time_bucket,
+            SELECT substr(ts, 1, 10) as time_bucket,
                 COUNT(*) AS count
             FROM
-                {DeviationActivity.table_name}
+                {Message.table_name}
             WHERE
-                timestamp >= :start_date
-                AND timestamp <= :end_date
+                ts >= :start_date
+                AND ts <= :end_date
                 AND deviationid = :deviationid
             GROUP BY
                 time_bucket
@@ -187,10 +186,10 @@ def get_publication_data(da: DeviantArt, start_date, end_date, gallery="all"):
         GROUP BY 1
         ORDER BY 1
     ), activity as (
-        SELECT date(timestamp) as date, COUNT(distinct deviationid) as count
-        FROM deviation_activity
+        SELECT substr(ts, 1, 10) as date, COUNT(distinct deviationid) as count
+        FROM messages
         {gallery_join if gallery else ''}
-        WHERE date(timestamp) >= '{start_date}' AND date(timestamp) <= '{end_date}'
+        WHERE ts >= '{start_date}' AND ts <= '{end_date}'
         {" and " +gallery_where if gallery else ''}
         GROUP BY 1
         ORDER BY 1
@@ -222,9 +221,10 @@ def get_gallery_data(da: DeviantArt):
         columns = [col[0].lower() for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+
 def get_deviation_data(da: DeviantArt, tags=None, gallery=None, limit=100, offset=0):
     """Get deviations filtered by tags and galleries.
-    
+
     Args:
         da: DeviantArt instance
         tags: List of tags to filter by
@@ -241,20 +241,20 @@ def get_deviation_data(da: DeviantArt, tags=None, gallery=None, limit=100, offse
         LEFT JOIN json_each(dm.galleries) gallery_json
         LEFT JOIN galleries g ON g.folderid = gallery_json.value->>'folderid'
     """
-    
+
     where_clauses = ["d.is_deleted = 0"]
     if tags:
         tags_list = [f"'%{tag}%'" for tag in tags]
         where_clauses.append(f"dm.tags LIKE ANY ({','.join(tags_list)})")
-        
+
     if gallery:
         where_clauses.append(f"g.folderid = '{gallery}'")
-        
+
     if where_clauses:
         query += f" WHERE {' AND '.join(where_clauses)}"
-        
+
     query += f" GROUP BY d.deviationid order by d.published_time desc LIMIT {limit} OFFSET {offset}"
-    
+
     with sqlite3.connect(da.sqlite_db) as conn:
         cursor = conn.cursor()
         cursor.execute(query)

@@ -193,6 +193,16 @@ class DeviantArt:
             for item in results:
                 yield Deviation.from_json(item)
 
+    def get_deviation(self, deviation_id) -> Deviation:
+        url = f"{API_BASE_URL}/deviation/{deviation_id}"
+        params = {"access_token": self.access_token}
+        try:
+            response = raise_for_status(requests.get(url, params=params))
+            return Deviation.from_json(response.json())
+        except Exception as e:
+            logging.error(f"Error fetching deviation {deviation_id}: {e}")
+            return None
+
     def get_whofaved(self, deviation_id, offset=0):
         url = f"{API_BASE_URL}/deviation/whofaved"
 
@@ -622,8 +632,80 @@ def populate(da: DeviantArt, full=False, username=None, offset=0):
         db.commit()
 
 
-if __name__ == "__main__":
+def download_images(da: DeviantArt, output_folder="images"):
+    """Download full size images for all deviations in the database"""
+    import os
+    import requests
+    from pathlib import Path
 
+    # Create output folder if it doesn't exist
+    Path(output_folder).mkdir(exist_ok=True)
+
+    with sqlite3.connect(da.sqlite_db) as db:
+        # Get all deviations with content info
+        cursor = db.execute("SELECT deviationid, title, content FROM deviations")
+        deviations = cursor.fetchall()
+
+        for deviationid, title, content in deviations:
+            print(deviationid, title)
+
+            if content := json.loads(content or "{}"):
+                if full_size_url := content.get("src"):
+                    # Determine file extension from URL
+                    file_extension = full_size_url.split(".")[-1].split("?")[0]
+                    if file_extension not in ["jpg", "jpeg", "png", "gif", "webp"]:
+                        file_extension = "jpg"  # Default fallback
+
+                    safe_title = "".join(
+                        c for c in title if c.isalnum() or c in (" ", "-", "_")
+                    ).rstrip()
+                    safe_title = safe_title[:100]
+
+                    filename = f"{deviationid}_{safe_title}.{file_extension}"
+                    filepath = os.path.join(output_folder, filename)
+
+                    if os.path.exists(filepath):
+                        logging.info(f"Skipping {filename} because it already exists")
+                        continue
+
+                    deviation = da.get_deviation(deviationid)
+                    if not deviation:
+                        logging.warning(f"Deviation {deviationid} not found")
+                        continue
+                    if not deviation.content:
+                        logging.warning(f"Deviation {deviationid} has no content")
+                        continue
+
+                    full_size_url = deviation.content.src
+                    if not full_size_url:
+                        logging.warning(f"Deviation {deviationid} has no full size URL")
+                        continue
+
+                    # Download the image
+                    logging.info(f"Downloading {filename}...")
+                    response = requests.get(full_size_url)
+                    try:
+                        response.raise_for_status()
+                    except Exception as e:
+                        logging.error(f"Error downloading {filename}: {e}")
+                        continue
+
+                    with open(filepath, "wb") as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+
+                    logging.info(f"Successfully downloaded {filename}")
+
+                    # Add a small delay to be respectful to the API
+                    time.sleep(0.5)
+
+                else:
+                    logging.warning(
+                        f"No full size URL found for deviation {deviationid}"
+                    )
+
+
+if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -644,6 +726,7 @@ if __name__ == "__main__":
 
     da.check_token()
 
+    # download_images(da)
     populate(da, args.full, args.username)
 
     print("Data collection completed.")

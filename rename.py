@@ -1,5 +1,6 @@
 import os
-import sqlite3
+from database import init_db, get_session
+from db_helpers import execute_raw_sql
 import shutil
 
 
@@ -11,15 +12,16 @@ def move_thumbs_to_subfolders(db_path, thumbs_dir, dryrun, destination):
         print("No SQLite database path provided")
         return
 
-    # Connect to SQLite database
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    # Get all deviation IDs
-    cursor.execute("SELECT deviationid FROM deviations")
-    deviation_ids = [row[0] for row in cursor.fetchall()]
-
-    conn.close()
+    # Initialize database and get session
+    init_db(db_path)
+    conn = get_session()
+    
+    try:
+        # Get all deviation IDs
+        cursor = execute_raw_sql(conn, "SELECT deviationid FROM deviations")
+        deviation_ids = [row[0] for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
     thumbs_dir = "thumbs"
     if not os.path.exists(thumbs_dir):

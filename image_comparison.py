@@ -9,7 +9,6 @@ Image comparison script that:
 
 import os
 import hashlib
-import sqlite3
 import json
 import argparse
 from pathlib import Path
@@ -22,6 +21,8 @@ import re
 from collections import defaultdict
 from datetime import datetime
 import urllib.parse
+from database import init_db, get_session
+from db_helpers import execute_raw_sql
 
 # Set up logging
 logging.basicConfig(
@@ -212,63 +213,67 @@ class ImageComparer:
     def get_deviation_metadata(self, deviation_id: str) -> Optional[Dict]:
         """Get deviation metadata from database."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            init_db(self.db_path)
+            conn = get_session()
+            
+            try:
+                # Query for deviation data
+                cursor = execute_raw_sql(conn,
+                    """
+                    SELECT d.deviationid, d.url, d.title, d.is_favourited, d.is_deleted, d.is_published,
+                           d.published_time, d.allows_comments, d.is_mature, d.is_downloadable,
+                           d.download_filesize, d.excerpt,
+                           dm.mature_level, dm.mature_classification,
+                           s.favourites, s.comments, dm.tags
+                    FROM deviations d
+                    LEFT JOIN deviation_metadata dm ON d.deviationid = dm.deviationid
+                    LEFT JOIN (
+                        SELECT deviationid, 
+                               count(messageid) filter (where type = 'feedback.favourite') as favourites,
+                               count(messageid) filter (where type = 'feedback.comment') as comments
+                        FROM messages
+                        GROUP BY deviationid
+                    ) s ON d.deviationid = s.deviationid
+                    WHERE d.deviationid = :deviation_id
+                """,
+                    {"deviation_id": deviation_id},
+                )
 
-            # Query for deviation data
-            cursor.execute(
-                """
-                SELECT d.deviationid, d.url, d.title, d.is_favourited, d.is_deleted, d.is_published,
-                       d.published_time, d.allows_comments, d.is_mature, d.is_downloadable,
-                       d.download_filesize, d.excerpt,
-                       dm.mature_level, dm.mature_classification,
-                       s.favourites, s.comments, dm.tags
-                FROM deviations d
-                LEFT JOIN deviation_metadata dm ON d.deviationid = dm.deviationid
-                LEFT JOIN (
-                    SELECT deviationid, 
-                           count(messageid) filter (where type = 'feedback.favourite') as favourites,
-                           count(messageid) filter (where type = 'feedback.comment') as comments
-                    FROM messages
-                    GROUP BY deviationid
-                ) s ON d.deviationid = s.deviationid
-                WHERE d.deviationid = ?
-            """,
-                (deviation_id,),
-            )
+                r = cursor.fetchone()
+                if r:
+                    # Get tags - they're stored as JSON strings within a JSON array
+                    row = dict(zip([c[0] for c in cursor.description], r))
 
-            r = cursor.fetchone()
-            if r:
-                # Get tags - they're stored as JSON strings within a JSON array
-                row = dict(zip([c[0] for c in cursor.description], r))
+                    tags = []
+                    if row["tags"]:
+                        # Parse JSON array of tag objects
+                        try:
+                            # First parse the outer JSON array
+                            tags_array = json.loads(row["tags"])
+                            # Then extract tag names from each tag object
+                            for tag_obj_str in tags_array:
+                                if isinstance(tag_obj_str, dict):
+                                    tags.append(tag_obj_str.get("tag_name", ""))
+                                else:
+                                    tag_obj = json.loads(tag_obj_str)
+                                    tags.append(tag_obj.get("tag_name", ""))
+                        except Exception as e:
+                            logger.error(f"Error parsing tags for {deviation_id}: {e}")
+                            tags = []
 
-                tags = []
-                if row["tags"]:
-                    # Parse JSON array of tag objects
-                    try:
-                        # First parse the outer JSON array
-                        tags_array = json.loads(row["tags"])
-                        # Then extract tag names from each tag object
-                        for tag_obj_str in tags_array:
-                            tag_obj = json.loads(tag_obj_str)
-                            tags.append(tag_obj.get("tag_name", ""))
-                    except Exception as e:
-                        logger.error(f"Error parsing tags for {deviation_id}: {e}")
-                        tags = []
-
-                return {
-                    "deviation_id": row["deviationid"],
-                    "url": row["url"],
-                    "title": row["title"],
-                    "favourites": row["favourites"],
-                    "comments": row["comments"],
-                    "tags": tags,
-                    "published_time": datetime.fromtimestamp(
-                        int(row["published_time"])
-                    ),
-                }
-
-            conn.close()
+                    return {
+                        "deviation_id": row["deviationid"],
+                        "url": row["url"],
+                        "title": row["title"],
+                        "favourites": row["favourites"],
+                        "comments": row["comments"],
+                        "tags": tags,
+                        "published_time": datetime.fromtimestamp(
+                            int(row["published_time"])
+                        ),
+                    }
+            finally:
+                conn.close()
         except Exception as e:
             logger.error(f"Error querying database for {deviation_id}: {e}")
 

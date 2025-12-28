@@ -1,6 +1,6 @@
 from celery import Celery
 from da import DeviantArt, populate_gallery, populate_metadata, populate_favorites
-import sqlite3
+from database import get_session
 import os
 import logging
 
@@ -25,10 +25,14 @@ def populate_gallery_task(username=None, gallery="all", full=False, offset=0):
         )
         da.check_token()
 
-        with sqlite3.connect(da.sqlite_db) as db:
+        db = get_session()
+        try:
             populate_gallery(
                 da, db, gallery=gallery, username=username, full=full, offset=offset
             )
+            db.commit()
+        finally:
+            db.close()
         return {
             "status": "success",
             "message": f"Gallery data populated for {username or 'all users'}",
@@ -50,8 +54,12 @@ def populate_metadata_task(username=None):
         )
         da.check_token()
 
-        with sqlite3.connect(da.sqlite_db) as db:
+        db = get_session()
+        try:
             populate_metadata(da, db)
+            db.commit()
+        finally:
+            db.close()
         return {
             "status": "success",
             "message": f"Metadata populated for {username or 'all users'}",
@@ -73,8 +81,12 @@ def populate_favorites_task(username=None):
         )
         da.check_token()
 
-        with sqlite3.connect(da.sqlite_db) as db:
+        db = get_session()
+        try:
             populate_favorites(da, db)
+            db.commit()
+        finally:
+            db.close()
         return {
             "status": "success",
             "message": f"Favorites populated for {username or 'all users'}",

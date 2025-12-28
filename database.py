@@ -42,7 +42,7 @@ def init_db(sqlite_db=None):
     _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
     
     # Import all models to ensure they're registered
-    from models_new import (
+    from models import (
         User, Deviation, DeviationActivity, Collection, 
         Gallery, DeviationMetadata, Message
     )

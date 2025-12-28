@@ -1,9 +1,10 @@
 import os
-import sqlite3
 from PIL import Image
 import imagehash
 from collections import defaultdict
 from da import DeviantArt
+from database import get_session
+from db_helpers import execute_raw_sql
 
 
 def get_hashes(folder_path):
@@ -88,29 +89,30 @@ def main():
         print("No duplicate images found.")
         return
 
-    conn = sqlite3.connect(args.sqlitedb)
-    cursor = conn.cursor()
+    da = DeviantArt(sqlitedb=args.sqlitedb)
+    conn = get_session()
+    
+    try:
+        print(f"\nFound {len(duplicates)} duplicate images:")
+        for hash_value, filepaths in duplicates:
+            print(f"\nDuplicate set (hash: {hash_value}):")
+            for filepath in filepaths:
+                uuid = os.path.basename(filepath).split(".")[0]
+                cursor = execute_raw_sql(conn, "SELECT * FROM deviations WHERE deviationid = :uuid", {"uuid": uuid})
+                cols = [desc[0] for desc in cursor.description]
+                rec = cursor.fetchone()
+                if rec is None:
+                    print(f"  {filepath} --> Not found in database")
+                    continue
+                dev = {cols[i]: rec[i] for i in range(len(cols))}
+                print(f"  {filepath} --> {dev['url']} ({dev['is_deleted']})")
 
-    print(f"\nFound {len(duplicates)} duplicate images:")
-    for hash_value, filepaths in duplicates:
-        print(f"\nDuplicate set (hash: {hash_value}):")
-        for filepath in filepaths:
-            uuid = os.path.basename(filepath).split(".")[0]
-            cursor.execute("SELECT * FROM deviations WHERE deviationid = ?", (uuid,))
-            cols = [desc[0] for desc in cursor.description]
-            rec = cursor.fetchone()
-            if rec is None:
-                print(f"  {filepath} --> Not found in database")
-                continue
-            dev = {cols[i]: rec[i] for i in range(len(cols))}
-            print(f"  {filepath} --> {dev['url']} ({dev['is_deleted']})")
-
-        # for filepath in filepaths[1:]:
-        #     print(f"  {filepath} --> Deleting")
-        #     if os.path.exists(filepath):
-        #         os.remove(filepath)
-
-    conn.close()
+            # for filepath in filepaths[1:]:
+            #     print(f"  {filepath} --> Deleting")
+            #     if os.path.exists(filepath):
+            #         os.remove(filepath)
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
-import sqlite3
 from models import *
 from datetime import datetime, timedelta
 from da import DeviantArt
+from database import get_session
+from db_helpers import execute_raw_sql
 
 
 def top_by_activity(
@@ -54,11 +55,13 @@ def top_by_activity(
             "cast(deviations.stats->'favourites' as int) desc, deviations.published_time"
         )
 
-    with sqlite3.connect(da.sqlite_db) as conn:
-        cursor = conn.cursor()
-        cursor.execute(query.sql(limit=limit))
+    conn = get_session()
+    try:
+        cursor = execute_raw_sql(conn, query.sql(limit=limit))
         columns = [col[0].lower() for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
 
 def get_user_data(da: DeviantArt, start_time, end_time, limit=10, gallery="all"):
@@ -82,11 +85,13 @@ def get_user_data(da: DeviantArt, start_time, end_time, limit=10, gallery="all")
     if end_time:
         query = query.where(f"timestamp <= '{end_time}'")
 
-    with sqlite3.connect(da.sqlite_db) as conn:
-        cursor = conn.cursor()
-        cursor.execute(query.sql(limit=limit))
+    conn = get_session()
+    try:
+        cursor = execute_raw_sql(conn, query.sql(limit=limit))
         columns = [col[0].lower() for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
 
 def calculate_grouping_minutes(start_date, end_date, max_groups=100):
@@ -114,7 +119,7 @@ def get_deviation_activity(da: DeviantArt, deviationid, start_date, end_date):
             SELECT substr(ts, 1, 10) as time_bucket,
                 COUNT(*) AS count
             FROM
-                {Message.table_name}
+                messages
             WHERE
                 ts >= :start_date
                 AND ts <= :end_date
@@ -147,10 +152,10 @@ def get_deviation_activity(da: DeviantArt, deviationid, start_date, end_date):
             ts.time_bucket
         """
 
-    with sqlite3.connect(da.sqlite_db) as conn:
+    conn = get_session()
+    try:
         logger.debug(query)
-        cursor = conn.cursor()
-        cursor.execute(
+        cursor = execute_raw_sql(conn,
             query,
             {
                 "grouping_minutes": grouping_minutes,
@@ -161,6 +166,8 @@ def get_deviation_activity(da: DeviantArt, deviationid, start_date, end_date):
         )
         columns = [col[0].lower() for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
 
 def get_publication_data(da: DeviantArt, start_date, end_date, gallery="all"):
@@ -199,11 +206,13 @@ def get_publication_data(da: DeviantArt, start_date, end_date, gallery="all"):
     FULL OUTER JOIN deviationas ON activity.date = deviationas.date
     """
     print(query)
-    with sqlite3.connect(da.sqlite_db) as conn:
-        cursor = conn.cursor()
-        cursor.execute(query)
+    conn = get_session()
+    try:
+        cursor = execute_raw_sql(conn, query)
         columns = [col[0].lower() for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
 
 def get_gallery_data(da: DeviantArt):
@@ -214,12 +223,14 @@ def get_gallery_data(da: DeviantArt):
         GROUP BY folderid, name
         ORDER BY count(*) DESC
     """
-    with sqlite3.connect(da.sqlite_db) as conn:
+    conn = get_session()
+    try:
         logger.debug(query)
-        cursor = conn.cursor()
-        cursor.execute(query)
+        cursor = execute_raw_sql(conn, query)
         columns = [col[0].lower() for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
 
 def get_deviation_data(da: DeviantArt, tags=None, gallery=None, limit=100, offset=0):
@@ -255,8 +266,10 @@ def get_deviation_data(da: DeviantArt, tags=None, gallery=None, limit=100, offse
 
     query += f" GROUP BY d.deviationid order by d.published_time desc LIMIT {limit} OFFSET {offset}"
 
-    with sqlite3.connect(da.sqlite_db) as conn:
-        cursor = conn.cursor()
-        cursor.execute(query)
+    conn = get_session()
+    try:
+        cursor = execute_raw_sql(conn, query)
         columns = [col[0].lower() for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()

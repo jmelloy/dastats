@@ -1,5 +1,4 @@
 import requests
-import sqlite3
 import time
 import os
 import json
@@ -7,6 +6,7 @@ import logging
 from datetime import datetime
 import pandas as pd
 from typing import Iterator
+from sqlalchemy.orm import Session
 from models import (
     Deviation,
     DeviationActivity,
@@ -17,6 +17,8 @@ from models import (
     Gallery,
     Message,
 )
+from database import init_db, get_session
+from db_helpers import upsert_model, execute_raw_sql
 from utils import get_table_info, generate_alter_statements, create_temp_db_from_sql
 
 logger = logging.getLogger(__name__)
@@ -56,6 +58,9 @@ class DeviantArt:
             self.sqlite_db = sqlitedb
         else:
             self.sqlite_db = os.path.join(file_path, "deviantart_data.sqlite")
+
+        # Initialize the database with SQLAlchemy
+        init_db(self.sqlite_db)
 
         if os.path.exists(".credentials.json"):
             with open(".credentials.json", "r") as F:
@@ -359,11 +364,11 @@ class DeviantArt:
         ).json()
 
 
-def populate_feed(da: DeviantArt, db: sqlite3.Connection):
+def populate_feed(da: DeviantArt, db: Session):
     stacks = set()
 
     query = Select(Message, ["messageid"]).where(f"messageid is not null")
-    rows = db.execute(query.sql()).fetchall()
+    rows = execute_raw_sql(db, query.sql()).fetchall()
     messages = {row[0] for row in rows}
 
     inserted = 0
@@ -372,14 +377,17 @@ def populate_feed(da: DeviantArt, db: sqlite3.Connection):
 
         if item.stackid and item.stack_count > 1:
             stacks.add(item.stackid)
-            item.timestamp = None
+            item.ts = None
 
-        item.deviationid = (item.deviation and item.deviation.deviationid) or (
-            item.subject and item.subject.get("deviation", {}).get("deviationid")
-        )
+        # Handle nested User object in originator
+        if item.originator and isinstance(item.originator, dict):
+            originator_data = item.originator
+            if 'userid' in originator_data:
+                originator_user = User.from_json(originator_data)
+                upsert_model(db, originator_user)
 
-        item.insert(db, conflict_mode="replace")
-        item.originator.insert(db, conflict_mode="replace")
+        # Insert the message
+        upsert_model(db, item)
 
         inserted += 1
 
@@ -392,7 +400,7 @@ def populate_feed(da: DeviantArt, db: sqlite3.Connection):
     logger.info(f"Processed {inserted} stacks")
 
 
-def populate_feed_stacks(da: DeviantArt, db: sqlite3.Connection):
+def populate_feed_stacks(da: DeviantArt, db: Session):
     query = (
         Select(Message, ["stackid", "deviationid", "stack_count", "count(*)"])
         .where(f"stackid is not null and stack_count > 1")
@@ -401,27 +409,28 @@ def populate_feed_stacks(da: DeviantArt, db: sqlite3.Connection):
     )
     logger.info(query.sql())
 
-    rows = db.execute(
+    rows = execute_raw_sql(db,
         Select(Message, ["messageid"]).where(f"stackid is null").sql()
     ).fetchall()
     messages = {row[0] for row in rows}
 
-    rows = db.execute(query.sql()).fetchall()
+    rows = execute_raw_sql(db, query.sql()).fetchall()
     for stack, deviationid, stack_count, count in rows:
         logger.info(f"Processing stack {stack}: {deviationid=} {stack_count=} {count=}")
         inserted = 0
         for item in da.get_feed_stack(stack):
 
             logger.debug(item)
-            item.deviationid = (item.deviation and item.deviation.deviationid) or (
-                item.subject and item.subject.get("deviation", {}).get("deviationid")
-            )
 
-            item.insert(
-                db, conflict_mode="replace", allow_nulls=["stackid", "stack_count"]
-            )
+            # Handle nested User object in originator
+            if item.originator and isinstance(item.originator, dict):
+                originator_data = item.originator
+                if 'userid' in originator_data:
+                    originator_user = User.from_json(originator_data)
+                    upsert_model(db, originator_user)
 
-            item.originator.insert(db, conflict_mode="replace")
+            # Insert the message
+            upsert_model(db, item)
 
             if item.messageid in messages:
                 logger.info(f"Message {item.messageid} already exists")
@@ -435,7 +444,7 @@ def populate_feed_stacks(da: DeviantArt, db: sqlite3.Connection):
 
 def populate_gallery(
     da: DeviantArt,
-    db: sqlite3.Connection,
+    db: Session,
     gallery="all",
     username=None,
     full=False,
@@ -448,32 +457,39 @@ def populate_gallery(
         da.get_all_deviations(gallery=gallery, offset=offset, username=username)
     ):
         logger.debug(item)
-        deviation_ids.append(item.deviationid)
-        author = item.author
-        if author:
-            r = author.insert(db, conflict_mode="replace")
-            item.user_id = author.userid
+        deviation_ids.append(str(item.deviationid))
+        
+        # Handle author (User object)
+        if item.author and isinstance(item.author, dict):
+            author_data = item.author
+            if 'userid' in author_data:
+                author = User.from_json(author_data)
+                upsert_model(db, author)
+                item.user_id = author.userid
 
+        # Download thumbnail if needed
         if item.thumbs and not os.path.exists(
             f"{file_path}/thumbs/{item.deviationid}.jpg"
         ):
-            for thumb in item.thumbs:
-                if thumb.src:
+            for thumb_data in item.thumbs:
+                if isinstance(thumb_data, dict) and thumb_data.get('src'):
                     os.makedirs("thumbs", exist_ok=True)
-                    res = requests.get(thumb.src)
+                    res = requests.get(thumb_data['src'])
                     if res.status_code == 200:
                         with open(f"thumbs/{item.deviationid}.jpg", "wb") as F:
                             F.write(res.content)
                         break
 
+        # Check if deviation already exists
         q = Select(Deviation).where(f"deviations.deviationid == '{item.deviationid}'")
-        rs = db.execute(q.sql())
+        rs = execute_raw_sql(db, q.sql())
         if rs.fetchone():
             logger.debug(f"Deviation {item.deviationid} already exists")
             if not full:
                 break
 
-        item.insert(db, conflict_mode="replace")
+        # Insert the deviation
+        upsert_model(db, item)
 
         if i % 24 == 0:
             db.commit()
@@ -483,11 +499,11 @@ def populate_gallery(
     if full and deviation_ids:
         q = f"""update deviations set is_deleted = true, updated_at = datetime('now') where deviationid not in ('{"','".join(deviation_ids)}')"""
         logger.info(q)
-        db.execute(q)
+        execute_raw_sql(db, q)
         db.commit()
 
 
-def populate_metadata(da: DeviantArt, db: sqlite3.Connection):
+def populate_metadata(da: DeviantArt, db: Session):
     select = (
         Select(
             Deviation,
@@ -500,77 +516,90 @@ def populate_metadata(da: DeviantArt, db: sqlite3.Connection):
     )
     print(select.sql())
 
-    rs = db.execute(select.sql(), {"mod": datetime.now().hour})
+    rs = execute_raw_sql(db, select.sql(), {"mod": datetime.now().hour})
     rows = rs.fetchall()
     logger.info(f"Fetching metadata for {len(rows)} deviations")
 
     deviation_ids = [str(row[0]) for row in rows]
     for i, item in enumerate(da.get_metadata(deviation_ids)):
-        user = item.author
-        if user:
-            user.insert(db, conflict_mode="replace")
-            item.user_id = user.userid
+        # Handle author (User object)
+        if item.author and isinstance(item.author, dict):
+            author_data = item.author
+            if 'userid' in author_data:
+                user = User.from_json(author_data)
+                upsert_model(db, user)
+                item.user_id = user.userid
 
-        item.insert(db, conflict_mode="replace")
+        # Insert metadata
+        upsert_model(db, item)
 
-        for c in item.collections:
-            r = c.insert(db, conflict_mode="replace")
+        # Handle collections
+        if item.collections and isinstance(item.collections, list):
+            for c_data in item.collections:
+                if isinstance(c_data, dict) and 'folderid' in c_data:
+                    c = Collection(folderid=c_data['folderid'], name=c_data.get('name', ''))
+                    upsert_model(db, c)
 
-        for g in item.galleries:
-            r = g.insert(db, conflict_mode="replace")
+        # Handle galleries
+        if item.galleries and isinstance(item.galleries, list):
+            for g_data in item.galleries:
+                if isinstance(g_data, dict) and 'folderid' in g_data:
+                    g = Gallery(folderid=g_data['folderid'], name=g_data.get('name', ''))
+                    upsert_model(db, g)
 
-        db.execute(
-            f"UPDATE deviations SET stats = ?, title = ? WHERE deviationid = ?",
-            (
-                json.dumps(
-                    {
-                        "favourites": item.stats.favourites,
-                        "comments": item.stats.comments,
-                    }
-                ),
-                item.title,
-                item.deviationid,
-            ),
-        )
+        # Update deviation with stats
+        if item.stats and isinstance(item.stats, dict):
+            execute_raw_sql(db,
+                f"UPDATE deviations SET stats = :stats, title = :title WHERE deviationid = :deviationid",
+                {
+                    "stats": json.dumps({
+                        "favourites": item.stats.get('favourites', 0),
+                        "comments": item.stats.get('comments', 0),
+                    }),
+                    "title": item.title,
+                    "deviationid": str(item.deviationid),
+                }
+            )
         if i % 10 == 0:
             db.commit()
     db.commit()
 
 
-def populate_favorites(da: DeviantArt, db: sqlite3.Connection):
+def populate_favorites(da: DeviantArt, db: Session):
     select = (
         Select(
             DeviationMetadata,
             [
                 "deviationid",
                 "cast(stats->'favourites' as integer)",
-                f"count({DeviationActivity.table_name}.deviationid)",
+                f"count(deviation_activity.deviationid)",
             ],
         )
         .join(DeviationActivity, on="deviationid", how="left")
         .where(f"action = 'fave'")
         .group_by("1,2")
         .having(
-            f"cast(stats->'favourites' as integer) <> count({DeviationActivity.table_name}.deviationid)"
+            f"cast(stats->'favourites' as integer) <> count(deviation_activity.deviationid)"
         )
     )
     logger.info(select.sql())
-    rows = db.execute(select.sql()).fetchall()
+    rows = execute_raw_sql(db, select.sql()).fetchall()
 
     for deviation_id, fav, count in rows:
         logger.info(f"Fetching /whofaved for {deviation_id=}: ({count=}, {fav=})")
         if count > fav:
-            db.execute(
-                f"DELETE FROM {DeviationActivity.table_name} WHERE deviationid = ?",
-                (deviation_id,),
+            execute_raw_sql(db,
+                f"DELETE FROM deviation_activity WHERE deviationid = :deviation_id",
+                {"deviation_id": deviation_id}
             )
             logger.info(f"Deleted {count - fav} rows for deviation: {deviation_id}")
             count = 0
 
         for item in da.get_whofaved(deviation_id, offset=count):
-            user = User.from_json(item.get("user"))
-            if user:
-                user.insert(db, conflict_mode="replace")
+            user_data = item.get("user")
+            if user_data:
+                user = User.from_json(user_data)
+                upsert_model(db, user)
 
                 a = DeviationActivity(
                     deviationid=deviation_id,
@@ -579,7 +608,7 @@ def populate_favorites(da: DeviantArt, db: sqlite3.Connection):
                     action="fave",
                     timestamp=datetime.fromtimestamp(item.get("time")),
                 )
-                a.insert(db, conflict_mode="ignore")
+                upsert_model(db, a)
         db.commit()
         time.sleep(1)
 
@@ -588,32 +617,12 @@ def populate(da: DeviantArt, full=False, username=None, offset=0):
 
     da.check_token()
 
-    with sqlite3.connect(da.sqlite_db) as db:
-        for table in [
-            User,
-            Deviation,
-            DeviationMetadata,
-            DeviationActivity,
-            Collection,
-            Gallery,
-            Message,
-        ]:
-            existing = get_table_info(da.sqlite_db, table.table_name)
-            if not existing["columns"]:
-                logging.info(table.create_table_sql())
-                db.execute(table.create_table_sql())
-                continue
-
-            new_info = create_temp_db_from_sql(table.create_table_sql())
-
-            alter_statements = generate_alter_statements(
-                existing, new_info, table.table_name
-            )
-
-            for stmt in alter_statements:
-                logging.info(stmt)
-                db.execute(stmt)
-
+    # Use SQLAlchemy session instead of sqlite3 connection
+    db = get_session()
+    try:
+        # Tables are already created by init_db in DeviantArt.__init__
+        # No need for manual table creation or migration here
+        
         populate_gallery(
             da, db, gallery="all", username=username, full=full, offset=offset
         )
@@ -630,6 +639,8 @@ def populate(da: DeviantArt, full=False, username=None, offset=0):
 
         populate_feed_stacks(da, db)
         db.commit()
+    finally:
+        db.close()
 
 
 def download_images(da: DeviantArt, output_folder="images"):
@@ -641,9 +652,10 @@ def download_images(da: DeviantArt, output_folder="images"):
     # Create output folder if it doesn't exist
     Path(output_folder).mkdir(exist_ok=True)
 
-    with sqlite3.connect(da.sqlite_db) as db:
+    db = get_session()
+    try:
         # Get all deviations with content info
-        cursor = db.execute("SELECT deviationid, title, content FROM deviations")
+        cursor = execute_raw_sql(db, "SELECT deviationid, title, content FROM deviations")
         deviations = cursor.fetchall()
 
         for deviationid, title, content in deviations:
@@ -658,51 +670,28 @@ def download_images(da: DeviantArt, output_folder="images"):
 
                     safe_title = "".join(
                         c for c in title if c.isalnum() or c in (" ", "-", "_")
-                    ).rstrip()
-                    safe_title = safe_title[:100]
-
-                    filename = f"{deviationid}_{safe_title}.{file_extension}"
-                    filepath = os.path.join(output_folder, filename)
-
-                    if os.path.exists(filepath):
-                        logging.info(f"Skipping {filename} because it already exists")
-                        continue
-
-                    deviation = da.get_deviation(deviationid)
-                    if not deviation:
-                        logging.warning(f"Deviation {deviationid} not found")
-                        continue
-                    if not deviation.content:
-                        logging.warning(f"Deviation {deviationid} has no content")
-                        continue
-
-                    full_size_url = deviation.content.src
-                    if not full_size_url:
-                        logging.warning(f"Deviation {deviationid} has no full size URL")
-                        continue
-
-                    # Download the image
-                    logging.info(f"Downloading {filename}...")
-                    response = requests.get(full_size_url)
-                    try:
-                        response.raise_for_status()
-                    except Exception as e:
-                        logging.error(f"Error downloading {filename}: {e}")
-                        continue
-
-                    with open(filepath, "wb") as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            f.write(chunk)
-
-                    logging.info(f"Successfully downloaded {filename}")
-
-                    # Add a small delay to be respectful to the API
-                    time.sleep(0.5)
-
-                else:
-                    logging.warning(
-                        f"No full size URL found for deviation {deviationid}"
+                    ).strip()[:100]
+                    output_path = (
+                        f"{output_folder}/{deviationid}_{safe_title}.{file_extension}"
                     )
+
+                    # Skip if already downloaded
+                    if os.path.exists(output_path):
+                        print(f"  Skipping {safe_title} (already exists)")
+                        continue
+
+                    # Download image
+                    try:
+                        response = requests.get(full_size_url, stream=True)
+                        response.raise_for_status()
+                        with open(output_path, "wb") as f:
+                            for chunk in response.iter_content(chunk_size=8192):
+                                f.write(chunk)
+                        print(f"  Downloaded: {safe_title}")
+                    except Exception as e:
+                        print(f"  Error downloading {safe_title}: {e}")
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
@@ -731,8 +720,9 @@ if __name__ == "__main__":
 
     print("Data collection completed.")
 
-    with sqlite3.connect(da.sqlite_db) as db:
-        rs = db.execute(
+    db = get_session()
+    try:
+        rs = execute_raw_sql(db,
             """SELECT title, count(*) filter(where type='feedback.favourite' or type='feedback.collect'), count(*) filter(where type='feedback.comment'), url
             FROM deviations 
             join messages on deviations.deviationid = messages.deviationid
@@ -743,3 +733,5 @@ if __name__ == "__main__":
 
         headers = ["Title", "Favorites", "Comments", "URL"]
         print("\n" + tabulate(rs, headers=headers, tablefmt="grid"))
+    finally:
+        db.close()

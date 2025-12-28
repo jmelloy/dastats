@@ -9,3 +9,5 @@ imagehash
 pandas
 celery
 redis
+sqlalchemy
+sqlmodel

@@ -4,10 +4,45 @@ import uuid
 import json
 from sqlmodel import SQLModel, Field, Column, Relationship
 from sqlalchemy import JSON, String, DateTime, Boolean, text, ForeignKey
+from sqlalchemy.types import TypeDecorator, CHAR
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# Custom UUID type for SQLite compatibility
+class GUID(TypeDecorator):
+    """Platform-independent GUID type.
+    Uses PostgreSQL's UUID type, otherwise uses CHAR(32), storing as stringified hex values.
+    """
+    impl = CHAR
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == 'postgresql':
+            return dialect.type_descriptor(PGUUID())
+        else:
+            return dialect.type_descriptor(CHAR(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        elif dialect.name == 'postgresql':
+            return str(value)
+        else:
+            if isinstance(value, uuid.UUID):
+                return str(value)
+            else:
+                return str(uuid.UUID(value))
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        else:
+            if not isinstance(value, uuid.UUID):
+                value = uuid.UUID(value)
+            return value
 
 
 # Custom JSON encoder for datetime and UUID
@@ -100,7 +135,7 @@ class User(SQLModel, table=True):
     
     userid: uuid.UUID = Field(
         default_factory=uuid.uuid4,
-        sa_column=Column(String, primary_key=True)
+        sa_column=Column(GUID, primary_key=True)
     )
     username: str
     usericon: str
@@ -138,7 +173,7 @@ class Deviation(SQLModel, table=True):
     
     deviationid: uuid.UUID = Field(
         default_factory=uuid.uuid4,
-        sa_column=Column(String, primary_key=True)
+        sa_column=Column(GUID, primary_key=True)
     )
     printid: Optional[str] = None
     url: Optional[str] = None
@@ -148,7 +183,7 @@ class Deviation(SQLModel, table=True):
     is_published: Optional[bool] = None
     is_blocked: Optional[bool] = None
     
-    user_id: Optional[uuid.UUID] = Field(default=None, sa_column=Column(String, ForeignKey("users.userid")))
+    user_id: Optional[uuid.UUID] = Field(default=None, sa_column=Column(GUID, ForeignKey("users.userid")))
     
     # JSON fields for complex nested data
     author: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
@@ -210,10 +245,10 @@ class DeviationActivity(SQLModel, table=True):
     __tablename__ = "deviation_activity"
     
     deviationid: uuid.UUID = Field(
-        sa_column=Column(String, ForeignKey("deviations.deviationid"), primary_key=True)
+        sa_column=Column(GUID, ForeignKey("deviations.deviationid"), primary_key=True)
     )
     userid: uuid.UUID = Field(
-        sa_column=Column(String, primary_key=True)
+        sa_column=Column(GUID, primary_key=True)
     )
     action: str = Field(primary_key=True)
     time: int = Field(primary_key=True)
@@ -235,7 +270,7 @@ class Collection(SQLModel, table=True):
     
     folderid: uuid.UUID = Field(
         default_factory=uuid.uuid4,
-        sa_column=Column(String, primary_key=True)
+        sa_column=Column(GUID, primary_key=True)
     )
     name: str
     
@@ -254,7 +289,7 @@ class Gallery(SQLModel, table=True):
     
     folderid: uuid.UUID = Field(
         default_factory=uuid.uuid4,
-        sa_column=Column(String, primary_key=True)
+        sa_column=Column(GUID, primary_key=True)
     )
     name: str
     
@@ -272,10 +307,10 @@ class DeviationMetadata(SQLModel, table=True):
     __tablename__ = "deviation_metadata"
     
     deviationid: uuid.UUID = Field(
-        sa_column=Column(String, primary_key=True)
+        sa_column=Column(GUID, primary_key=True)
     )
-    printid: Optional[uuid.UUID] = Field(default=None, sa_column=Column(String))
-    user_id: Optional[uuid.UUID] = Field(default=None, sa_column=Column(String, ForeignKey("users.userid")))
+    printid: Optional[uuid.UUID] = Field(default=None, sa_column=Column(GUID))
+    user_id: Optional[uuid.UUID] = Field(default=None, sa_column=Column(GUID, ForeignKey("users.userid")))
     
     # JSON fields
     author: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
@@ -335,7 +370,7 @@ class Message(SQLModel, table=True):
     
     messageid: uuid.UUID = Field(
         default_factory=uuid.uuid4,
-        sa_column=Column(String, primary_key=True)
+        sa_column=Column(GUID, primary_key=True)
     )
     type: str
     orphaned: bool
@@ -355,7 +390,7 @@ class Message(SQLModel, table=True):
     gallery: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     html: Optional[str] = None
     
-    deviationid: Optional[uuid.UUID] = Field(default=None, sa_column=Column(String, ForeignKey("deviations.deviationid")))
+    deviationid: Optional[uuid.UUID] = Field(default=None, sa_column=Column(GUID, ForeignKey("deviations.deviationid")))
     
     created_at: datetime = Field(
         default_factory=datetime.now,

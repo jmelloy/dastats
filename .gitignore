@@ -169,5 +169,7 @@ thumbs/*
 *.sqlite
 *.sqlite.wal
 *.sqlite-journal
+*.backup
+*_old.py
 scripts/output/*
 scripts/mage_raw.txt

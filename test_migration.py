@@ -16,8 +16,11 @@ def test_basic_operations():
     """Test basic CRUD operations with SQLModel"""
     print("Testing basic SQLAlchemy/SQLModel operations...")
     
-    # Create a temporary database
-    test_db = tempfile.mktemp(suffix='.sqlite')
+    # Create a temporary database using secure method
+    import tempfile
+    temp_file = tempfile.NamedTemporaryFile(suffix='.sqlite', delete=False)
+    test_db = temp_file.name
+    temp_file.close()
     print(f"Using test database: {test_db}")
     
     try:

@@ -6,7 +6,6 @@ from sqlalchemy import text
 from sqlmodel import SQLModel
 import uuid
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 

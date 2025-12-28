@@ -89,7 +89,7 @@ def test_basic_operations():
             
             # Query back the user
             from sqlalchemy import select
-            stmt = select(User).where(User.userid == str(user_id))
+            stmt = select(User).where(User.userid == user_id)
             result = session.execute(stmt)
             queried_user = result.scalar_one_or_none()
             

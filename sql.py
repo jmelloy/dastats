@@ -119,7 +119,7 @@ def get_deviation_activity(da: DeviantArt, deviationid, start_date, end_date):
             SELECT substr(ts, 1, 10) as time_bucket,
                 COUNT(*) AS count
             FROM
-                messages
+                {Message.__tablename__}
             WHERE
                 ts >= :start_date
                 AND ts <= :end_date
